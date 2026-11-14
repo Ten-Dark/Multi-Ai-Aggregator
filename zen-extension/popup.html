@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multi-AI Aggregator Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="icons/icon.svg" alt="" width="32" height="32" />
+        <div>
+          <h1>Multi-AI Aggregator</h1>
+          <p class="version">Zen bridge · v<span id="version">0.1.0</span></p>
+        </div>
+      </header>
+
+      <section class="status-box">
+        <span id="status-dot" class="dot"></span>
+        <div>
+          <p id="status-text">Проверка состояния…</p>
+          <p id="status-detail" class="detail"></p>
+        </div>
+      </section>
+
+      <label for="pairing">Код подключения</label>
+      <textarea
+        id="pairing"
+        rows="3"
+        spellcheck="false"
+        placeholder="ws://127.0.0.1:XXXXX|ТОКЕН"
+      ></textarea>
+      <p class="hint">
+        Скопируйте код из раздела «Подключение к Zen» в приложении Multi-AI Aggregator и вставьте
+        сюда. Код хранится только в этом расширении.
+      </p>
+
+      <div class="actions">
+        <button id="save" type="button" class="primary">Подключить</button>
+        <button id="clear" type="button" class="ghost">Удалить код</button>
+      </div>
+
+      <p id="message" class="message" role="status"></p>
+
+      <footer>
+        <p>
+          Расширение работает с уже открытыми сессиями Zen. Оно не читает cookies и пароли и не
+          отправляет данные никуда, кроме localhost.
+        </p>
+      </footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

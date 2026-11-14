@@ -1,0 +1,182 @@
+:root {
+  color-scheme: light;
+  --text: #1c2430;
+  --text-soft: #5b6675;
+  --border: #dbe2ea;
+  --bg: #f6f8fb;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --ok: #15803d;
+  --warn: #a16207;
+  --bad: #b91c1c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 370px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 'Segoe UI', system-ui, sans-serif;
+}
+
+main {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+header img {
+  flex: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.version {
+  margin: 2px 0 0;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.status-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #9aa4b2;
+  flex: none;
+}
+
+.dot.ok {
+  background: var(--ok);
+}
+
+.dot.warn {
+  background: var(--warn);
+}
+
+.dot.bad {
+  background: var(--bad);
+}
+
+#status-text {
+  margin: 0;
+  font-weight: 600;
+}
+
+.detail {
+  margin: 2px 0 0;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+label {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 9px;
+  border: 1px solid #c7d1dc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font: 12px/1.45 Consolas, 'Cascadia Mono', monospace;
+}
+
+textarea:focus,
+button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 1px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 11.5px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  border-radius: 7px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+button.primary:hover {
+  background: var(--primary-hover);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text-soft);
+  border-color: var(--border);
+}
+
+button.ghost:hover {
+  background: #eef1f5;
+  color: var(--text);
+}
+
+.message {
+  min-height: 16px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.message.error {
+  color: var(--bad);
+}
+
+.message.ok {
+  color: var(--ok);
+}
+
+footer {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+footer p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+}

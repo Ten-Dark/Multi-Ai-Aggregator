@@ -1,0 +1,628 @@
+'use strict'
+
+const MODELS = ['chatgpt', 'qwen', 'deepseek']
+const ADAPTERS = {
+  chatgpt: { label: 'ChatGPT', url: 'https://chatgpt.com/', hosts: ['chatgpt.com'] },
+  qwen: { label: 'Qwen', url: 'https://chat.qwen.ai/', hosts: ['chat.qwen.ai'] },
+  deepseek: { label: 'DeepSeek', url: 'https://chat.deepseek.com/', hosts: ['chat.deepseek.com'] },
+}
+
+const PAIRING_KEY = 'maiPairing'
+const TABS_KEY = 'maiTabs'
+const STATUS_KEY = 'maiStatus'
+const RECONNECT_MS = 5000
+const EXTENSION_VERSION = browser.runtime.getManifest().version
+
+let socket = null
+let authTimer = null
+let reconnectTimer = null
+let authenticated = false
+let lastAuthError = ''
+let currentStatus = { state: 'idle', message: 'Код подключения не задан.' }
+
+function setStatus(state, message) {
+  currentStatus = { state, message, updatedAt: Date.now() }
+  void browser.storage.local.set({ [STATUS_KEY]: currentStatus })
+  updateBadge(state)
+}
+
+function updateBadge(state) {
+  const text = state === 'connected' ? '' : state === 'idle' ? '?' : '!'
+  const color = state === 'connected' ? '#15803d' : state === 'idle' ? '#a16207' : '#b91c1c'
+  void browser.browserAction.setBadgeText({ text })
+  void browser.browserAction.setBadgeBackgroundColor({ color })
+  void browser.browserAction.setTitle({
+    title: text ? `Multi-AI Aggregator: ${currentStatus.message}` : 'Multi-AI Aggregator: подключено к Electron',
+  })
+}
+
+function sendRaw(payload) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false
+  try {
+    socket.send(JSON.stringify(payload))
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function getPairing() {
+  const data = await browser.storage.local.get(PAIRING_KEY)
+  return typeof data[PAIRING_KEY] === 'string' ? data[PAIRING_KEY] : ''
+}
+
+async function setPairing(code) {
+  await browser.storage.local.set({ [PAIRING_KEY]: code })
+}
+
+function parsePairing(code) {
+  const trimmed = String(code || '').trim()
+  const separator = trimmed.lastIndexOf('|')
+  if (separator <= 0) {
+    throw new Error('Неверный формат кода. Ожидается ws://127.0.0.1:ПОРТ|ТОКЕН')
+  }
+  const rawUrl = trimmed.slice(0, separator).trim()
+  const token = trimmed.slice(separator + 1).trim()
+  let parsed
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error('Неверный адрес WebSocket в коде подключения.')
+  }
+  if (parsed.protocol !== 'ws:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+    throw new Error('Код должен содержать локальный адрес ws://127.0.0.1.')
+  }
+  if (!token) throw new Error('В коде подключения отсутствует токен.')
+  return { url: parsed.toString(), token }
+}
+
+const PAIR_PORTS = [45123, 45124, 45125, 45126, 45127, 45128, 45129, 45130, 45131, 45132, 45133, 45134]
+
+// Ask the local app for its pairing token. The bridge only answers requests
+// coming from an extension origin, so ordinary web pages cannot read it.
+async function discoverPairing() {
+  for (const port of PAIR_PORTS) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 1200)
+      const response = await fetch(`http://127.0.0.1:${port}/pair`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!response.ok) continue
+      const data = await response.json()
+      if (data && typeof data.wsUrl === 'string' && typeof data.token === 'string') {
+        return `${data.wsUrl}|${data.token}`
+      }
+    } catch {
+      // No bridge on this port.
+    }
+  }
+  return ''
+}
+
+async function maybeApplyDevPairing() {
+  if (await getPairing()) return
+  try {
+    const response = await fetch(browser.runtime.getURL('dev-pairing.json'), { cache: 'no-store' })
+    if (!response.ok) return
+    const data = await response.json()
+    if (data && typeof data.code === 'string' && data.code.trim()) {
+      await setPairing(data.code.trim())
+    }
+  } catch {
+    // dev-pairing.json is absent in production builds.
+  }
+}
+
+async function connect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return
+  }
+
+  let code = await getPairing()
+  if (!code) {
+    setStatus('connecting', 'Ищу Multi-AI Aggregator на этом компьютере…')
+    code = await discoverPairing()
+    if (code) await setPairing(code)
+  }
+  if (!code) {
+    setStatus(
+      'idle',
+      'Приложение не запущено. Запустите Multi-AI Aggregator — подключение произойдёт автоматически.',
+    )
+    scheduleReconnect()
+    return
+  }
+
+  let target
+  try {
+    target = parsePairing(code)
+  } catch (error) {
+    setStatus('error', error instanceof Error ? error.message : String(error))
+    return
+  }
+
+  setStatus('connecting', 'Подключение к Multi-AI Aggregator…')
+  let nextSocket
+  try {
+    nextSocket = new WebSocket(target.url)
+  } catch (error) {
+    setStatus('error', error instanceof Error ? error.message : String(error))
+    scheduleReconnect()
+    return
+  }
+  socket = nextSocket
+
+  nextSocket.addEventListener('open', () => {
+    authTimer = setTimeout(() => {
+      try {
+        nextSocket.close()
+      } catch {
+        // Ignore.
+      }
+    }, 5000)
+    sendRaw({ type: 'auth', token: target.token, extensionVersion: EXTENSION_VERSION })
+  })
+
+  nextSocket.addEventListener('message', (event) => {
+    let message
+    try {
+      message = JSON.parse(event.data)
+    } catch {
+      return
+    }
+    handleServerMessage(message)
+  })
+
+  nextSocket.addEventListener('close', (event) => {
+    authenticated = false
+    if (event && event.code === 1008 && String(event.reason || '').includes('Replaced')) {
+      setStatus('idle', 'Подключение заменено другим окном Zen. Перезагрузите расширение.')
+      return
+    }
+    if (authTimer) {
+      clearTimeout(authTimer)
+      authTimer = null
+    }
+    if (socket === nextSocket) socket = null
+    if (lastAuthError) {
+      setStatus('error', lastAuthError)
+      lastAuthError = ''
+      // The app may have rotated its token; forget the old code and rediscover.
+      void browser.storage.local.remove(PAIRING_KEY).then(() => {
+        scheduleReconnect()
+      })
+      return
+    }
+    setStatus('disconnected', 'Нет соединения с Multi-AI Aggregator. Повторное подключение…')
+    scheduleReconnect()
+  })
+
+  nextSocket.addEventListener('error', () => {
+    // The close handler reports the state and schedules a retry.
+  })
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    void connect()
+  }, RECONNECT_MS)
+}
+
+function handleServerMessage(message) {
+  if (!message || typeof message.type !== 'string') return
+  if (message.type === 'auth-ok') {
+    authenticated = true
+    lastAuthError = ''
+    if (authTimer) {
+      clearTimeout(authTimer)
+      authTimer = null
+    }
+    setStatus('connected', 'Подключено к Multi-AI Aggregator.')
+    return
+  }
+  if (message.type === 'auth-error') {
+    lastAuthError = typeof message.message === 'string' ? message.message : 'Неверный код подключения.'
+    void browser.storage.local.remove(PAIRING_KEY)
+    if (socket) {
+      try {
+        socket.close()
+      } catch {
+        // Ignore.
+      }
+    }
+    return
+  }
+  if (message.type === 'ping') {
+    sendRaw({ type: 'pong' })
+    return
+  }
+  if (message.type === 'command') {
+    void runCommand(message)
+  }
+}
+
+function errorPayload(error) {
+  return {
+    code: typeof error?.code === 'string' ? error.code : 'unknown',
+    message: error instanceof Error ? error.message : String(error),
+    partial: typeof error?.partial === 'string' ? error.partial : undefined,
+  }
+}
+
+function makeError(code, message, partial) {
+  const error = new Error(message)
+  error.code = code
+  if (partial) error.partial = partial
+  return error
+}
+
+function sendResponse(id, ok, data, error) {
+  sendRaw({ type: 'response', id, ok, data, error })
+}
+
+async function runCommand(message) {
+  const { id, action, payload } = message
+  try {
+    const data = await executeAction(action, payload)
+    sendResponse(id, true, data)
+  } catch (error) {
+    sendResponse(id, false, undefined, errorPayload(error))
+  }
+}
+
+function assertModel(value) {
+  if (!MODELS.includes(value)) throw makeError('unknown', 'Неизвестная модель.')
+  return value
+}
+
+function validatePrompt(value) {
+  if (typeof value !== 'string' || !value.trim()) throw makeError('unknown', 'Запрос пуст.')
+  if (value.length > 300_000) throw makeError('unknown', 'Запрос слишком длинный.')
+  return value
+}
+
+function clampTimeout(value, fallback) {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(330_000, Math.max(30_000, Math.floor(value)))
+}
+
+async function executeAction(action, payload) {
+  if (action === 'open') {
+    const state = await ensureTabs()
+    await focusWindow(state.windowId)
+    await activateTab(state.tabs.chatgpt)
+    return { opened: true }
+  }
+
+  if (action === 'focus') {
+    const model = assertModel(payload?.model)
+    const state = await ensureTabs()
+    await focusWindow(state.windowId)
+    await activateTab(state.tabs[model])
+    return { focused: true }
+  }
+
+  if (action === 'checkSessions') {
+    const state = await ensureTabs()
+    const sessions = await Promise.all(
+      MODELS.map(async (model) => {
+        try {
+          const info = await inspectModelSession(model, state.tabs[model])
+          return { model, ...info }
+        } catch (error) {
+          return {
+            model,
+            status: 'error',
+            message: error instanceof Error ? error.message : `Не удалось проверить ${ADAPTERS[model].label}.`,
+          }
+        }
+      }),
+    )
+    return sessions
+  }
+
+  if (action === 'send') {
+    const model = assertModel(payload?.model)
+    const prompt = validatePrompt(payload?.prompt)
+    const timeoutMs = clampTimeout(payload?.timeoutMs, 240_000)
+    const purpose = payload?.purpose === 'synthesis' ? 'synthesis' : 'answer'
+    const text = await runModelPrompt(model, prompt, timeoutMs, purpose)
+    return { text }
+  }
+
+  throw makeError('unknown', `Неизвестное действие: ${String(action)}`)
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function getTabsState() {
+  const data = await browser.storage.local.get(TABS_KEY)
+  return data[TABS_KEY] && typeof data[TABS_KEY] === 'object' ? data[TABS_KEY] : null
+}
+
+async function saveTabsState(state) {
+  await browser.storage.local.set({ [TABS_KEY]: state })
+}
+
+async function createTab(windowId, model) {
+  const tab = await browser.tabs.create({
+    windowId,
+    url: ADAPTERS[model].url,
+    active: false,
+  })
+  return tab.id
+}
+
+let ensureTabsPromise = null
+
+async function ensureTabs() {
+  if (!ensureTabsPromise) {
+    ensureTabsPromise = doEnsureTabs().finally(() => {
+      ensureTabsPromise = null
+    })
+  }
+  return ensureTabsPromise
+}
+
+async function doEnsureTabs() {
+  let state = await getTabsState()
+  let windowInfo = null
+  if (state?.windowId) {
+    windowInfo = await browser.windows.get(state.windowId).catch(() => null)
+  }
+
+  if (!windowInfo) {
+    const created = await browser.windows.create({ focused: false })
+    const createdTabs = await browser.tabs.query({ windowId: created.id })
+    state = { windowId: created.id, tabs: {} }
+    for (const model of MODELS) {
+      state.tabs[model] = await createTab(state.windowId, model)
+    }
+    for (const tab of createdTabs) {
+      await browser.tabs.remove(tab.id).catch(() => {})
+    }
+    await saveTabsState(state)
+    return state
+  }
+
+  if (!state.tabs) state.tabs = {}
+  for (const model of MODELS) {
+    const tabId = state.tabs[model]
+    const tab = tabId ? await browser.tabs.get(tabId).catch(() => null) : null
+    if (!tab || tab.windowId !== state.windowId) {
+      state.tabs[model] = await createTab(state.windowId, model)
+    }
+  }
+  await saveTabsState(state)
+  return state
+}
+
+async function focusWindow(windowId) {
+  await browser.windows.update(windowId, { focused: true }).catch(() => {})
+}
+
+async function activateTab(tabId) {
+  if (!tabId) return
+  await browser.tabs.update(tabId, { active: true }).catch(() => {})
+}
+
+async function waitForTabLoaded(tabId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  await delay(300)
+  while (Date.now() < deadline) {
+    const tab = await browser.tabs.get(tabId).catch(() => null)
+    if (!tab) throw makeError('browser', 'Вкладка Zen была закрыта.')
+    if (tab.status === 'complete') return
+    await delay(300)
+  }
+  throw makeError('timeout', 'Страница сервиса не загрузилась за отведённое время.')
+}
+
+async function waitForContent(tabId, timeoutMs = 45_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
+      if (response?.ok) return
+    } catch {
+      // The content script is not ready yet.
+    }
+    await delay(300)
+  }
+  throw makeError(
+    'site',
+    'Не удалось связаться со страницей сервиса. Откройте вкладку и проверьте, что сайт загрузился.',
+  )
+}
+
+async function ensureModelTab(model, options = {}) {
+  const state = await ensureTabs()
+  const tabId = state.tabs[model]
+  if (!tabId) throw makeError('browser', 'Не удалось создать вкладку сервиса.')
+
+  if (options.navigate) {
+    await browser.tabs.update(tabId, { url: ADAPTERS[model].url })
+    await waitForTabLoaded(tabId, 60_000)
+  }
+
+  await waitForContent(tabId)
+  return tabId
+}
+
+function loginUrlForModel(model, url) {
+  const patterns = {
+    chatgpt: /auth\.openai\.com|\/auth\/(?:login|signin|signup)|\/log-in/i,
+    qwen: /\/login|\/signin|\/sign-in/i,
+    deepseek: /\/sign_in|\/login|\/signin/i,
+  }
+  return patterns[model].test(url)
+}
+
+async function inspectModelSession(model, tabId) {
+  let lastError = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let tab = await browser.tabs.get(tabId).catch(() => null)
+    if (!tab) throw makeError('browser', 'Вкладка сервиса закрыта.')
+
+    if (loginUrlForModel(model, tab.url || '')) {
+      return {
+        status: 'login-required',
+        message: 'Требуется вход в аккаунт.',
+        url: tab.url,
+      }
+    }
+
+    try {
+      if (attempt > 0 && tab.status === 'loading') {
+        await waitForTabLoaded(tabId, 30_000).catch(() => {})
+      }
+      await waitForContent(tabId, attempt === 0 ? 30_000 : 20_000)
+      const response = await browser.tabs.sendMessage(tabId, {
+        type: 'mai:inspect',
+        timeoutMs: 20_000,
+      })
+      if (!response?.ok) {
+        throw makeError('site', response?.error?.message || 'Страница не ответила на проверку.')
+      }
+      return response.session
+    } catch (error) {
+      lastError = error
+      tab = await browser.tabs.get(tabId).catch(() => null)
+      if (tab && loginUrlForModel(model, tab.url || '')) {
+        return { status: 'login-required', message: 'Требуется вход в аккаунт.', url: tab.url }
+      }
+      if (attempt < 2) await delay(1000 + attempt * 1500)
+    }
+  }
+
+  throw makeError(
+    'site',
+    `${ADAPTERS[model].label}: страница перезагружалась во время проверки. Откройте вкладку и проверьте её состояние.`,
+    lastError instanceof Error ? lastError.message : undefined,
+  )
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(makeError('timeout', message)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+async function runModelPrompt(model, prompt, timeoutMs, purpose) {
+  const tabId = await ensureModelTab(model, { navigate: true })
+  const label = ADAPTERS[model].label
+  let response
+  try {
+    response = await withTimeout(
+      browser.tabs.sendMessage(tabId, {
+        type: 'mai:send',
+        model,
+        prompt,
+        timeoutMs,
+        purpose,
+      }),
+      timeoutMs + 15_000,
+      `${label}: истекло время ожидания ответа.`,
+    )
+  } catch (error) {
+    if (error?.code) throw error
+    throw makeError(
+      'browser',
+      `${label}: вкладка закрыта или перезагружена во время выполнения запроса.`,
+    )
+  }
+
+  if (!response?.ok) {
+    const info = response?.error || {}
+    throw makeError(info.code || 'site', info.message || `${label}: неизвестная ошибка.`, info.partial)
+  }
+  if (typeof response.text !== 'string' || !response.text.trim()) {
+    throw makeError('site', `${label}: сервис вернул пустой ответ.`)
+  }
+  return response.text
+}
+
+browser.runtime.onMessage.addListener(async (message, sender) => {
+  if (!message || typeof message.type !== 'string') return undefined
+
+  if (message.type === 'mai:progress') {
+    if (authenticated && MODELS.includes(message.model)) {
+      sendRaw({
+        type: 'progress',
+        model: message.model,
+        phase: message.phase,
+        purpose: message.purpose,
+      })
+    }
+    return undefined
+  }
+
+  if (message.type === 'mai:get-status') {
+    return {
+      ok: true,
+      status: currentStatus,
+      hasPairing: Boolean(await getPairing()),
+      extensionVersion: EXTENSION_VERSION,
+    }
+  }
+
+  if (message.type === 'mai:set-pairing') {
+    const code = String(message.code || '').trim()
+    try {
+      parsePairing(code)
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    await setPairing(code)
+    lastAuthError = ''
+    if (socket) {
+      try {
+        socket.close()
+      } catch {
+        // Ignore.
+      }
+    }
+    await connect()
+    return { ok: true }
+  }
+
+  if (message.type === 'mai:clear-pairing') {
+    await browser.storage.local.remove(PAIRING_KEY)
+    lastAuthError = ''
+    if (socket) {
+      try {
+        socket.close()
+      } catch {
+        // Ignore.
+      }
+    }
+    setStatus('idle', 'Код подключения удалён.')
+    return { ok: true }
+  }
+
+  return undefined
+})
+
+void (async () => {
+  await maybeApplyDevPairing()
+  await connect()
+})()

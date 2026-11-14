@@ -1,0 +1,46 @@
+{
+  "manifest_version": 2,
+  "name": "Multi-AI Aggregator Bridge",
+  "version": "0.2.0",
+  "description": "Local bridge between Multi-AI Aggregator and ChatGPT, Qwen and DeepSeek tabs in Zen.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "multi-ai-aggregator@local",
+      "strict_min_version": "128.0"
+    }
+  },
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "http://127.0.0.1/*",
+    "https://chatgpt.com/*",
+    "https://chat.qwen.ai/*",
+    "https://chat.deepseek.com/*"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "browser_action": {
+    "default_title": "Multi-AI Aggregator",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon.svg"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.qwen.ai/*",
+        "https://chat.deepseek.com/*"
+      ],
+      "js": ["content/automation.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

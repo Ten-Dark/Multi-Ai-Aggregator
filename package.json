@@ -1,0 +1,66 @@
+{
+  "name": "multi-ai-aggregator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Electron app that queries ChatGPT, Qwen and DeepSeek and synthesizes their answers",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_RENDERER_URL=http://localhost:5173 electron .\"",
+    "build": "tsc -p tsconfig.json && vite build",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "playwright": "1.65.1",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "6.3.0",
+    "concurrently": "10.0.7",
+    "cross-env": "7.0.3",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "wait-on": "9.5.1"
+  },
+  "build": {
+    "productName": "Multi-AI Aggregator",
+    "appId": "com.local.multiaggregator",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "preload/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/playwright/**/*",
+      "node_modules/playwright-core/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
