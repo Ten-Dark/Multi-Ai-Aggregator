@@ -294,7 +294,10 @@ export class ZenBridge {
     socket.on('message', (raw) => {
       this.alive.set(socket, true)
       const message = parseMessage(raw)
-      if (!message || typeof message.type !== 'string') return
+      if (!message || typeof message.type !== 'string') {
+        socket.close(1007, 'Invalid message payload')
+        return
+      }
 
       if (!authenticated) {
         if (message.type !== 'auth') {
@@ -332,7 +335,9 @@ export class ZenBridge {
       }
       if (message.type === 'response') {
         this.handleResponse(message)
+        return
       }
+      socket.close(1008, 'Unsupported message type')
     })
 
     socket.on('pong', () => {

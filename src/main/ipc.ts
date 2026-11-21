@@ -2,6 +2,7 @@ import { app, clipboard, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { MODEL_IDS, type ModelId, type SynthesisRequest } from '../shared/types.js'
 import { getMainWindow } from './window.js'
 import type { ZenBridge } from './zen/bridge.js'
+import { isTrustedIpcSender } from './ipc-security.js'
 
 const MAX_PROMPT_CHARS = 300_000
 const MAX_COPY_CHARS = 2_000_000
@@ -16,38 +17,19 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
   if (
     !window ||
     window.isDestroyed() ||
-    event.sender !== window.webContents ||
-    !frame ||
-    frame.parent !== null ||
-
-    frame.url !== window.webContents.getURL()
+    !isTrustedIpcSender({
+      senderMatchesWindow: event.sender === window.webContents,
+      frameExists: Boolean(frame),
+      isMainFrame: Boolean(frame && frame.parent === null),
+      frameUrl: frame?.url ?? '',
+      currentUrl: window.webContents.getURL(),
+      isPackaged: app.isPackaged,
+    })
   ) {
     throw new Error('Недоверенный источник IPC-вызова.')
   }
-
-  let url: URL
-  try {
-    url = new URL(frame.url)
-  } catch {
-    throw new Error('Некорректный адрес IPC-источника.')
-  }
-
-  if (app.isPackaged) {
-    if (url.protocol !== 'file:') {
-      throw new Error('В production разрешён только локальный renderer.')
-    }
-    return
-  }
-
-  if (
-    url.protocol !== 'http:' ||
-    url.hostname !== 'localhost' ||
-    url.port !== '5173' ||
-    url.pathname !== '/'
-  ) {
-    throw new Error('IPC-вызов из недоверенного development renderer.')
-  }
 }
+
 
 function assertModel(value: unknown): asserts value is ModelId {
   if (typeof value !== 'string' || !MODEL_IDS.includes(value as ModelId)) {
