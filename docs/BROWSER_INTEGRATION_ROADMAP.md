@@ -42,11 +42,11 @@
 - [x] S1.3 Implement read-only Windows process enumeration in an isolated discovery service; no profile database access.
 - [x] S1.4 Parse process executable, command line, parent/child relationships, start time, and visible-window metadata.
 - [x] S1.5 Parse Firefox-family -profile and Chromium --user-data-dir / --profile-directory arguments.
-- [ ] S1.6 Add browser family/product identification from executable metadata and process metadata; support unknown/custom browser products.
+- [x] S1.6 Identify browser family/product from Windows executable version metadata (FileDescription, ProductName, CompanyName), with conservative false-positive handling and metadata fixtures.
 - [x] S1.7 Add deterministic fixtures for quoted paths, spaces, Unicode, missing flags, custom executables, and child processes.
 - [x] S1.8 Preserve multiple root process candidates and collapse child processes; no arbitrary first-process selection.
 - [x] S1.9 Add a read-only diagnostic for the user's currently running X:\BrowserPortal\ZenProfile instance when present; never assume that path in production code.
-- [ ] S1.10 Add macOS/Linux provider interfaces and document implementation requirements; do not claim those OSes supported until implemented and tested.
+- [ ] S1.10 Implement macOS/Linux process providers and complete platform-specific runtime validation. Initial providers and parser fixtures exist; native macOS/Linux execution remains unverified.
 
 **Exit criteria:** Discovery is path-independent on Windows, identifies multiple instances/profile candidates, exposes confidence/provenance, and does not inspect or modify profile databases.
 
@@ -160,8 +160,8 @@ The Windows discovery implementation is in `src/main/browser/browser-discovery.t
 
 Live Windows smoke validation identified the active Zen process, its `X:\\BrowserPortal\\ZenProfile` profile, and a visible Zen window title. The process scan is path-independent. Browser process detection remains distinct from extension connection, tab discovery, and provider authentication. Generic unknown executable candidates are intentionally conservative to avoid classifying unrelated Electron apps as browsers.
 
-macOS and Linux are deliberately reported as unsupported until their providers exist and pass platform-specific tests. The registry is ready for those providers, but this is not a claim of cross-platform discovery support.
+macOS and Linux process providers are implemented in `src/main/browser/unix-browser-discovery.ts` and selected by the shared registry. Cross-platform parser fixtures pass on Windows, but native `ps` output and live profile detection have not yet been validated on macOS or Linux; these platforms are not yet declared production-supported.
 
 ## Next implementation slice
 
-Complete browser product identification using executable metadata, then implement macOS and Linux providers. After Stage 1 acceptance, move to the browser-neutral connector abstraction. Do not begin multi-connector protocol changes until current bridge peer ownership and handshake behavior have been audited and captured in tests.
+Validate the macOS/Linux providers on native hosts or CI, then continue with the browser-neutral connector abstraction. Do not begin multi-connector protocol changes until current bridge peer ownership and handshake behavior have been audited and captured in tests.

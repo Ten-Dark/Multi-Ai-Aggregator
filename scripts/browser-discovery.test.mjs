@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { BrowserDiscoveryRegistry, parseWindowsBrowserProcesses } from '../dist-electron/main/browser/browser-discovery.js'
+import { parseUnixBrowserProcesses } from '../dist-electron/main/browser/unix-browser-discovery.js'
 
 test('discovers Zen portable profile from a quoted Firefox-family command line', () => {
   const result = parseWindowsBrowserProcesses({
@@ -191,4 +192,32 @@ test('does not classify unrelated Electron apps from generic browser-like metada
   })
 
   assert.equal(result.length, 0)
+})
+
+test('discovers Firefox and Chromium processes on Unix-like systems with distinct profiles', () => {
+  const result = parseUnixBrowserProcesses([
+    '  100  1 firefox /usr/lib/firefox/firefox -profile "/home/user/Profiles/Work"',
+    '  101  1 chromium /usr/bin/chromium --user-data-dir="/home/user/.config/chromium" --profile-directory="Profile 2"',
+    '  102  101 chromium /usr/lib/chromium/chromium --type=renderer',
+  ].join('\n'))
+
+  assert.equal(result.length, 2)
+  assert.equal(result[0].product, 'Chromium')
+  assert.equal(result[0].profilePath, '/home/user/.config/chromium')
+  assert.equal(result[0].profileName, 'Profile 2')
+  assert.equal(result[1].product, 'Firefox')
+  assert.equal(result[1].profilePath, '/home/user/Profiles/Work')
+})
+
+test('recognizes common macOS browser executable names and ignores unrelated processes', () => {
+  const result = parseUnixBrowserProcesses([
+    '  200  1 zen /Applications/Zen\\ Browser.app/Contents/MacOS/zen -profile "/Users/user/Library/Application Support/Zen"',
+    '  201  1 Brave Browser /Applications/Brave\\ Browser.app/Contents/MacOS/Brave\\ Browser',
+    '  202  1 slack /Applications/Slack.app/Contents/MacOS/Slack',
+  ].join('\n'))
+
+  assert.equal(result.length, 2)
+  assert.equal(result[0].product, 'Brave')
+  assert.equal(result[1].product, 'Zen Browser')
+  assert.equal(result[1].profilePath, '/Users/user/Library/Application Support/Zen')
 })

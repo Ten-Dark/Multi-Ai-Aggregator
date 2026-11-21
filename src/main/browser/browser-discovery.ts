@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import type { BrowserDiscoverySnapshot, BrowserFamily, BrowserProcessDescriptor, DiscoveryConfidence } from '../../shared/types.js'
+import type { BrowserDiscoverySnapshot, BrowserFamily, BrowserProcessDescriptor } from '../../shared/types.js'
+import { LinuxBrowserDiscoveryProvider, MacOSBrowserDiscoveryProvider } from './unix-browser-discovery.js'
 
 const execFileAsync = promisify(execFile)
 const PROCESS_TIMEOUT_MS = 12_000
@@ -242,7 +243,11 @@ export class WindowsBrowserDiscoveryProvider implements BrowserDiscoveryProvider
 export class BrowserDiscoveryService {
   private readonly registry: BrowserDiscoveryRegistry
 
-  constructor(providers: readonly BrowserDiscoveryProvider[] = [new WindowsBrowserDiscoveryProvider()]) {
+  constructor(providers: readonly BrowserDiscoveryProvider[] = [
+    new WindowsBrowserDiscoveryProvider(),
+    new MacOSBrowserDiscoveryProvider(),
+    new LinuxBrowserDiscoveryProvider(),
+  ]) {
     this.registry = new BrowserDiscoveryRegistry(providers)
   }
 
