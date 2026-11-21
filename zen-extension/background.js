@@ -14,7 +14,6 @@ const RECONNECT_MS = 5000
 const EXTENSION_VERSION = browser.runtime.getManifest().version
 
 let socket = null
-let authTimer = null
 let reconnectTimer = null
 let authenticated = false
 let lastAuthError = ''
@@ -127,9 +126,11 @@ async function connect() {
     return
   }
   socket = nextSocket
+  let socketAuthTimer = null
 
   nextSocket.addEventListener('open', () => {
-    authTimer = setTimeout(() => {
+    if (socket !== nextSocket) return
+    socketAuthTimer = setTimeout(() => {
       try {
         nextSocket.close()
       } catch {
@@ -146,18 +147,25 @@ async function connect() {
     } catch {
       return
     }
-    handleServerMessage(message)
+    if (socket !== nextSocket) return
+    handleServerMessage(message, nextSocket, () => {
+      if (socketAuthTimer) {
+        clearTimeout(socketAuthTimer)
+        socketAuthTimer = null
+      }
+    })
   })
 
   nextSocket.addEventListener('close', (event) => {
+    if (socket !== nextSocket) return
     authenticated = false
+    if (socketAuthTimer) {
+      clearTimeout(socketAuthTimer)
+      socketAuthTimer = null
+    }
     if (event && event.code === 1008 && String(event.reason || '').includes('Replaced')) {
       setStatus('idle', 'Подключение заменено другим окном Zen. Перезагрузите расширение.')
       return
-    }
-    if (authTimer) {
-      clearTimeout(authTimer)
-      authTimer = null
     }
     if (socket === nextSocket) socket = null
     if (lastAuthError) {
@@ -186,15 +194,13 @@ function scheduleReconnect() {
   }, RECONNECT_MS)
 }
 
-function handleServerMessage(message) {
+function handleServerMessage(message, sourceSocket, clearSourceAuthTimer) {
+  if (socket !== sourceSocket) return
   if (!message || typeof message.type !== 'string') return
   if (message.type === 'auth-ok') {
     authenticated = true
     lastAuthError = ''
-    if (authTimer) {
-      clearTimeout(authTimer)
-      authTimer = null
-    }
+    clearSourceAuthTimer?.()
     setStatus('connected', 'Подключено к Multi-AI Aggregator.')
     return
   }

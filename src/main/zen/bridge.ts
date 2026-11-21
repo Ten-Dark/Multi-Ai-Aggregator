@@ -16,7 +16,7 @@ import {
   type TaskErrorCode,
   type ZenConnectionInfo,
 } from '../../shared/types.js'
-import { buildSynthesisPrompt } from '../automation/synthesis-prompt.js'
+import { buildSynthesisPrompt } from '../synthesis/prompt.js'
 import { isAllowedZenExtensionOrigin, isValidZenExtensionOrigin } from './origin.js'
 
 const DEFAULT_PORT = 45123

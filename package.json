@@ -6,7 +6,8 @@
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_RENDERER_URL=http://localhost:5173 electron .\"",
-    "build": "tsc -p tsconfig.json && vite build",
+    "clean": "node -e \"require('node:fs').rmSync('dist-electron', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json && vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:security": "npm run build && node --test scripts/security-origin.test.mjs",
@@ -14,7 +15,6 @@
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {
-    "playwright": "1.65.1",
     "ws": "^8.23.0"
   },
   "devDependencies": {
@@ -27,6 +27,7 @@
     "cross-env": "7.0.3",
     "electron": "45.3.2",
     "electron-builder": "26.18.0",
+    "playwright": "1.65.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "typescript": "5.9.3",
@@ -43,10 +44,6 @@
       "dist-electron/**/*",
       "preload/**/*",
       "package.json"
-    ],
-    "asarUnpack": [
-      "node_modules/playwright/**/*",
-      "node_modules/playwright-core/**/*"
     ],
     "win": {
       "target": [
