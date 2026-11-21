@@ -2,6 +2,8 @@ export const MODEL_IDS = ['chatgpt', 'qwen', 'deepseek'] as const
 
 export type ModelId = (typeof MODEL_IDS)[number]
 
+export type TaskId = string
+
 export const MODEL_LABELS: Record<ModelId, string> = {
   chatgpt: 'ChatGPT',
   qwen: 'Qwen',
@@ -31,8 +33,10 @@ export type TaskStatus =
   | 'opening'
   | 'sending'
   | 'waiting'
+  | 'cancelling'
   | 'done'
   | 'error'
+  | 'cancelled'
 
 export type TaskErrorCode =
   | 'login'
@@ -46,6 +50,8 @@ export type TaskErrorCode =
 
 export interface ModelResult {
   model: ModelId
+  taskId?: TaskId
+  batchId?: TaskId
   status: TaskStatus
   text?: string
   error?: string

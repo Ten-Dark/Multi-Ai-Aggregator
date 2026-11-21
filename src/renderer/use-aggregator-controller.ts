@@ -19,8 +19,10 @@ const TASK_LABELS: Record<TaskStatus, string> = {
   opening: 'Открываю сайт',
   sending: 'Отправляю запрос',
   waiting: 'Ожидаю ответ',
+  cancelling: 'Отменяю…',
   done: 'Готово',
   error: 'Ошибка',
+  cancelled: 'Отменено',
 }
 
 const SESSION_LABELS: Record<SessionStatus, string> = {
@@ -51,11 +53,13 @@ const TASK_TONE: Record<TaskStatus, string> = {
   opening: 'warn',
   sending: 'warn',
   waiting: 'warn',
+  cancelling: 'warn',
   done: 'ok',
   error: 'bad',
+  cancelled: 'neutral',
 }
 
-const IN_PROGRESS: TaskStatus[] = ['queued', 'opening', 'sending', 'waiting']
+const IN_PROGRESS: TaskStatus[] = ['queued', 'opening', 'sending', 'waiting', 'cancelling']
 
 function createEmptyResults(): Record<ModelId, ModelResult> {
   return {

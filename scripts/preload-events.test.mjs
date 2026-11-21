@@ -42,6 +42,8 @@ test('preload forwards valid typed events and ignores malformed payloads', () =>
     { type: 'browser', browser: { status: 'running', browserName: 'Zen Browser' } },
     { type: 'session', session: { model: 'chatgpt', status: 'logged-in', message: 'ok' } },
     { type: 'model', result: { model: 'qwen', status: 'done', updatedAt: 123, text: 'answer' } },
+    { type: 'model', result: { model: 'chatgpt', status: 'cancelling', updatedAt: 124, taskId: '2f1a6e40-7a53-4c21-9e11-6e7c8b0f1234' } },
+    { type: 'model', result: { model: 'deepseek', status: 'cancelled', updatedAt: 125, taskId: '2f1a6e40-7a53-4c21-9e11-6e7c8b0f1234', batchId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } },
     { type: 'zen-connection', connection: { pairingCode: 'ws://127.0.0.1:45123|token', wsUrl: 'ws://127.0.0.1:45123', connected: true } },
   ]
 
@@ -56,6 +58,8 @@ test('preload forwards valid typed events and ignores malformed payloads', () =>
     { type: 'session', session: { model: 'other', status: 'logged-in', message: 'bad' } },
     { type: 'model', result: { model: 'chatgpt', status: 'done', updatedAt: NaN } },
     { type: 'model', result: { model: 'chatgpt', status: 'done', updatedAt: 1, errorCode: 'arbitrary' } },
+    { type: 'model', result: { model: 'chatgpt', status: 'done', updatedAt: 1, taskId: 'invalid-id' } },
+    { type: 'model', result: { model: 'chatgpt', status: 'cancelled', updatedAt: 1, batchId: 'not-a-uuid' } },
     { type: 'zen-connection', connection: { pairingCode: 1, wsUrl: 'bad', connected: true } },
   ]) preload.dispatch(event)
 

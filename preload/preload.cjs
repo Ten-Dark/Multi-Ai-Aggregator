@@ -5,8 +5,13 @@ const SESSION_STATUSES = new Set([
   'unknown', 'checking', 'logged-in', 'guest', 'login-required',
   'manual-action', 'blocked', 'error',
 ])
-const TASK_STATUSES = new Set(['idle', 'queued', 'opening', 'sending', 'waiting', 'done', 'error'])
+const TASK_STATUSES = new Set(['idle', 'queued', 'opening', 'sending', 'waiting', 'cancelling', 'done', 'error', 'cancelled'])
 const ERROR_CODES = new Set(['login', 'manual', 'blocked', 'timeout', 'busy', 'browser', 'site', 'unknown'])
+const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isTaskId(value) {
+  return typeof value === 'string' && TASK_ID_PATTERN.test(value)
+}
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -34,6 +39,8 @@ function isAggregatorEvent(value) {
     const result = value.result
     return isRecord(result) && MODEL_IDS.has(result.model) &&
       TASK_STATUSES.has(result.status) && Number.isFinite(result.updatedAt) &&
+      (result.taskId === undefined || isTaskId(result.taskId)) &&
+      (result.batchId === undefined || isTaskId(result.batchId)) &&
       (result.text === undefined || typeof result.text === 'string') &&
       (result.error === undefined || typeof result.error === 'string') &&
       (result.errorCode === undefined || ERROR_CODES.has(result.errorCode)) &&

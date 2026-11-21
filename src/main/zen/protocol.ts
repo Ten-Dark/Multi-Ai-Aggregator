@@ -10,6 +10,7 @@ export interface ZenAuthMessage {
 
 export interface ZenProgressMessage {
   type: 'progress'
+  taskId?: string
   model: ModelId
   phase: ProgressPhase
   purpose?: 'answer' | 'synthesis'
@@ -51,6 +52,11 @@ const TASK_ERROR_CODES: TaskErrorCode[] = [
 ]
 
 const PROGRESS_PHASES: ProgressPhase[] = ['opening', 'sending', 'waiting']
+const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function isTaskId(value: unknown): value is string {
+  return typeof value === 'string' && TASK_ID_PATTERN.test(value)
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -72,6 +78,7 @@ export function isZenProgressMessage(
 ): value is Record<string, unknown> & ZenProgressMessage {
   return (
     value.type === 'progress' &&
+    (value.taskId === undefined || isTaskId(value.taskId)) &&
     MODEL_IDS.includes(value.model as ModelId) &&
     typeof value.phase === 'string' &&
     PROGRESS_PHASES.includes(value.phase as ProgressPhase) &&
