@@ -40,3 +40,10 @@ The application now rotates the legacy bridge token into its protected `userData
 - The extension must never call `browser.tabs.remove()` or `browser.windows.remove()`, and must not reorganize or unpin tabs in the user's normal Zen workspace.
 - If script injection is blocked, the app reports that specific provider tab and asks for a manual reload rather than silently opening another tab.
 - Regression coverage asserts that destructive tab/window removal APIs are absent and that session checks do not call the tab-creation path.
+## Provider authentication evidence
+
+- Session detection combines provider-specific DOM evidence with a restricted cookie-metadata signal. The extension checks only cookie names and expiry/session metadata; cookie values are never read by application logic, logged, persisted, or sent to Electron.
+- A matching, non-expired session-cookie name is corroborating evidence only. It produces `session-available`, not `logged-in`, because cookie presence cannot prove that the provider still accepts the credential.
+- A visible account control or an explicit account-menu sign-out action can confirm `logged-in`. Detection does not click profile controls or open menus automatically.
+- Cookie inspection uses Firefox's `cookies` permission and existing provider host permissions. If the API is unavailable or denied, DOM detection continues without cookie evidence; it does not fail the whole session check.
+- Provider cookie-name patterns are compatibility heuristics, not stable provider APIs. They must be validated against real browser sessions and updated when providers change their authentication implementation.

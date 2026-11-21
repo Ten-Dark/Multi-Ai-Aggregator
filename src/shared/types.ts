@@ -14,6 +14,7 @@ export type SessionStatus =
   | 'unknown'
   | 'checking'
   | 'logged-in'
+  | 'session-available'
   | 'guest'
   | 'login-required'
   | 'manual-action'

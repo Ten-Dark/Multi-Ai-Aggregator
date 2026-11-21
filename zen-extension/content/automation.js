@@ -294,6 +294,7 @@
       loginFormVisible: anyVisible(adapter.loginFormSelectors),
       loggedOutVisible: anyVisible(adapter.loggedOutSelectors),
       loggedInVisible: anyVisible(adapter.loggedInSelectors),
+      accountMenuLogoutVisible: /(?:выйти из системы|выйти из аккаунта|log\s*out|sign\s*out)/i.test(document.body?.innerText || ''),
     }
   }
 
@@ -372,7 +373,7 @@
     }
   }
 
-  async function inspectSession(timeoutMs = 20_000) {
+  async function inspectSession(timeoutMs = 20_000, cookieEvidence = null) {
     const deadline = Date.now() + Math.max(1000, Math.min(30_000, timeoutMs))
     let page = inspectPage()
     while (Date.now() < deadline) {
@@ -396,12 +397,19 @@
             url: page.url,
           }
         }
-        if (page.loggedInVisible) {
-          return { status: 'logged-in', message: 'Вход подтверждён по элементам профиля.', url: page.url }
+        if (page.loggedInVisible || page.accountMenuLogoutVisible) {
+          return { status: 'logged-in', message: 'Вход подтверждён по элементам аккаунта.', url: page.url }
+        }
+        if (cookieEvidence?.sessionCookiePresent === true) {
+          return {
+            status: 'session-available',
+            message: 'Поле ввода доступно и найдена cookie сессии. Действительность авторизации ещё не подтверждена.',
+            url: page.url,
+          }
         }
         return {
           status: 'unknown',
-          message: 'Поле ввода доступно, но интерфейс не подтвердил состояние аккаунта.',
+          message: 'Поле ввода доступно, но признаки авторизации не обнаружены.',
           url: page.url,
         }
       }
@@ -807,7 +815,7 @@
     }
 
     if (message.type === 'mai:inspect') {
-      return inspectSession(message.timeoutMs)
+      return inspectSession(message.timeoutMs, message.cookieEvidence)
         .then((session) => ({ ok: true, session }))
         .catch((error) => ({ ok: false, error: errorPayload(error) }))
     }

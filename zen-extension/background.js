@@ -700,6 +700,31 @@ function loginUrlForModel(model, url) {
   return patterns[model].test(url)
 }
 
+const SESSION_COOKIE_NAME_PATTERNS = {
+  chatgpt: [/^__Secure-next-auth\.session-token(?:\.\d+)?$/i, /(?:^|[-_])(?:session|auth)[-_]?token(?:$|[._-])/i],
+  qwen: [/^tongyi_sso_ticket$/i, /^login_aliyunid$/i, /(?:^|[-_])(?:session|auth)[-_]?token(?:$|[._-])/i],
+  deepseek: [/^ds_session_id$/i, /(?:^|[-_])(?:session|auth)[-_]?token(?:$|[._-])/i],
+}
+
+async function getProviderCookieEvidence(model, tabUrl) {
+  if (!browser.cookies?.getAll || !SESSION_COOKIE_NAME_PATTERNS[model]) {
+    return { available: false, sessionCookiePresent: false }
+  }
+
+  try {
+    const cookies = await browser.cookies.getAll({ url: tabUrl })
+    const now = Date.now() / 1000
+    const present = cookies.some((cookie) => {
+      if (!cookie || typeof cookie.name !== 'string') return false
+      if (!SESSION_COOKIE_NAME_PATTERNS[model].some((pattern) => pattern.test(cookie.name))) return false
+      return cookie.session === true || (typeof cookie.expirationDate === 'number' && cookie.expirationDate > now)
+    })
+    return { available: true, sessionCookiePresent: present }
+  } catch {
+    return { available: false, sessionCookiePresent: false }
+  }
+}
+
 async function inspectModelSession(model, tabId) {
   let lastError = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -719,13 +744,16 @@ async function inspectModelSession(model, tabId) {
         await waitForTabLoaded(tabId, 30_000).catch(() => {})
       }
       await waitForContent(tabId, attempt === 0 ? 30_000 : 20_000)
+      const cookieEvidence = await getProviderCookieEvidence(model, tab.url || ADAPTERS[model].url)
       const response = await browser.tabs.sendMessage(tabId, {
         type: 'mai:inspect',
         timeoutMs: 20_000,
+        cookieEvidence,
       })
       if (!response?.ok) {
         throw makeError('site', response?.error?.message || 'Страница не ответила на проверку.')
       }
+
       return response.session
     } catch (error) {
       lastError = error
