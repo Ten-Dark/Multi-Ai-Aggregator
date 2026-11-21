@@ -25,6 +25,7 @@ Tasks:
 - [ ] P0.3 Compare adapter configuration in the current source tree and remove drift by defining one canonical provider adapter contract/configuration source.
 - [ ] P0.4 Define typed provider error taxonomy and task submission states, including `submission-unknown` and `partial` semantics; preserve current terminal-state arbitration.
 - [x] P0.5 Add deterministic tests for submission outcomes, prompt verification, and “never resend after ambiguous submission”.
+- [x] P0.6 Move bridge credentials into a dedicated protected directory, apply and verify a Windows DACL for the current user/SYSTEM/Administrators, and rotate the legacy token.
 
 Exit criteria: baseline recorded; adapter contract documented; all existing tests pass; no source behavior changes without tests.
 

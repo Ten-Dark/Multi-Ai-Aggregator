@@ -60,3 +60,15 @@ test('accepts the cancelled error code returned by cooperative extension cancell
     error: { code: 'cancelled', message: 'Operation cancelled.' },
   }), true)
 })
+
+test('accepts the ambiguous submission outcome from provider automation', () => {
+  assert.equal(isZenResponseMessage({
+    type: 'response',
+    id: 'ambiguous-submit-response',
+    ok: false,
+    error: {
+      code: 'submission-unknown',
+      message: 'The provider may have accepted the request.',
+    },
+  }), true)
+})

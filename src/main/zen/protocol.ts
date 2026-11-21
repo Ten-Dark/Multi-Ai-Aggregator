@@ -45,6 +45,7 @@ const TASK_ERROR_CODES: TaskErrorCode[] = [
   'login',
   'manual',
   'blocked',
+  'submission-unknown',
   'timeout',
   'busy',
   'browser',

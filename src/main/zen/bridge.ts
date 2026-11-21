@@ -27,6 +27,7 @@ import {
   type ZenResponseMessage,
 } from './protocol.js'
 import { TaskRegistry, type ActiveTask } from './task-registry.js'
+import { securePrivateDirectory, securePrivateFile } from './secure-storage.js'
 
 const DEFAULT_PORT = 45123
 const PORT_ATTEMPTS = 12
@@ -75,6 +76,7 @@ function tokensEqual(expected: string, received: string): boolean {
 
 export class ZenBridge {
   private readonly token: string
+  private readonly secureDir: string
   private readonly tokenFile: string
   private readonly extensionOriginFile: string
   private approvedExtensionOrigin: string | null = null
@@ -102,8 +104,9 @@ export class ZenBridge {
     private readonly dataDir: string,
     private readonly emit: EmitFn,
   ) {
-    this.tokenFile = path.join(dataDir, 'zen-bridge-token')
-    this.extensionOriginFile = path.join(dataDir, 'zen-bridge-origin')
+    this.secureDir = path.join(dataDir, 'zen-secure')
+    this.tokenFile = path.join(this.secureDir, 'zen-bridge-token')
+    this.extensionOriginFile = path.join(this.secureDir, 'zen-bridge-origin')
     this.token = this.loadOrCreateToken()
     this.approvedExtensionOrigin = this.loadApprovedExtensionOrigin()
   }
@@ -142,15 +145,29 @@ export class ZenBridge {
   }
 
   private loadOrCreateToken(): string {
+    securePrivateDirectory(this.secureDir)
+    let existingToken: string | null = null
     try {
+      securePrivateFile(this.tokenFile, this.secureDir)
       const existing = fs.readFileSync(this.tokenFile, 'utf8').trim()
-      if (existing.length >= 24) return existing
-    } catch {
-      // The token does not exist yet.
+      if (existing.length >= 24) existingToken = existing
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error
     }
-    const token = randomBytes(32).toString('base64url')
-    fs.mkdirSync(this.dataDir, { recursive: true })
-    fs.writeFileSync(this.tokenFile, token, { encoding: 'utf8', mode: 0o600 })
+    const token = existingToken ?? randomBytes(32).toString('base64url')
+    if (!existingToken) {
+      fs.writeFileSync(this.tokenFile, token, { encoding: 'utf8', mode: 0o600, flag: 'w' })
+      securePrivateFile(this.tokenFile, this.secureDir)
+    }
+
+    // The legacy token lived directly under userData and inherited its broad DACL.
+    // Rotate it only after the replacement is stored and ACL-verified.
+    const legacyTokenFile = path.join(this.dataDir, 'zen-bridge-token')
+    try {
+      fs.unlinkSync(legacyTokenFile)
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error
+    }
     return token
   }
 

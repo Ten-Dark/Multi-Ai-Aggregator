@@ -43,6 +43,7 @@ export type TaskErrorCode =
   | 'login'
   | 'manual'
   | 'blocked'
+  | 'submission-unknown'
   | 'timeout'
   | 'busy'
   | 'browser'
