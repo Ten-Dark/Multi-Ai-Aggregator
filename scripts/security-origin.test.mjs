@@ -324,3 +324,85 @@ test('persists the first authenticated extension origin across bridge restarts',
   const stillRejected = await authenticate(restartedConnection.wsUrl, otherOrigin, restartedToken)
   assert.equal(stillRejected.accepted, false)
 })
+
+
+test('rejects overlapping operations without disturbing the active request', async (t) => {
+  const { bridge, connection, token } = await createBridge(t, 'multi-ai-concurrent-operation-test-')
+  const client = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(client.accepted, true)
+
+  const commandPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for command.')), 3000)
+    client.socket.once('message', (raw) => {
+      clearTimeout(timer)
+      resolve(JSON.parse(raw.toString()))
+    })
+  })
+  const activeRequest = bridge.sendOne('chatgpt', 'first prompt')
+  const command = await commandPromise
+
+  await assert.rejects(bridge.sendOne('chatgpt', 'duplicate prompt'), /уже выполняет запрос/)
+  await assert.rejects(bridge.sendAll('batch prompt'), /выполняет запрос/)
+
+  client.socket.send(JSON.stringify({
+    type: 'response',
+    id: command.id,
+    ok: true,
+    data: { text: 'first answer' },
+  }))
+  const result = await activeRequest
+  assert.equal(result.status, 'done')
+  assert.equal(result.text, 'first answer')
+})
+
+test('turns an active request into a browser error when the extension disconnects', async (t) => {
+  const { bridge, connection, token } = await createBridge(t, 'multi-ai-disconnect-pending-test-')
+  const client = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(client.accepted, true)
+
+  const commandPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for command.')), 3000)
+    client.socket.once('message', (raw) => {
+      clearTimeout(timer)
+      resolve(JSON.parse(raw.toString()))
+    })
+  })
+  const activeRequest = bridge.sendOne('qwen', 'disconnect prompt')
+  await commandPromise
+
+  const closed = new Promise((resolve) => client.socket.once('close', resolve))
+  client.socket.close()
+  await closed
+
+  const result = await activeRequest
+  assert.equal(result.status, 'error')
+  assert.equal(result.errorCode, 'browser')
+})
+
+test('preserves partial model output when the extension reports a failed response', async (t) => {
+  const { bridge, connection, token } = await createBridge(t, 'multi-ai-partial-response-test-')
+  const client = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(client.accepted, true)
+
+  const commandPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for command.')), 3000)
+    client.socket.once('message', (raw) => {
+      clearTimeout(timer)
+      resolve(JSON.parse(raw.toString()))
+    })
+  })
+  const activeRequest = bridge.sendOne('deepseek', 'partial prompt')
+  const command = await commandPromise
+
+  client.socket.send(JSON.stringify({
+    type: 'response',
+    id: command.id,
+    ok: false,
+    error: { code: 'timeout', message: 'Response timed out.', partial: 'partial answer' },
+  }))
+
+  const result = await activeRequest
+  assert.equal(result.status, 'error')
+  assert.equal(result.partial, true)
+  assert.equal(result.text, 'partial answer')
+})

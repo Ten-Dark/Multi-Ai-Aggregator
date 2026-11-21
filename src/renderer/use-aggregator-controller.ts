@@ -11,6 +11,7 @@ import {
   type ZenConnectionInfo,
 } from '../shared/types'
 import { EventSnapshotTracker, type SnapshotKey } from '../shared/event-snapshot'
+import { OperationGate } from '../shared/operation-gate'
 
 const TASK_LABELS: Record<TaskStatus, string> = {
   idle: 'Ожидает запроса',
@@ -94,6 +95,8 @@ export function useAggregatorController() {
   const [copiedKey, setCopiedKey] = useState('')
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const snapshotTracker = useRef(new EventSnapshotTracker()).current
+  const operationGate = useRef(new OperationGate()).current
+  const sessionCheckCount = useRef(0)
 
   const zenConnected = Boolean(zenConnection?.connected)
   const taskInProgress = useMemo(
@@ -136,6 +139,7 @@ export function useAggregatorController() {
       model,
       snapshotTracker.capture(('session:' + model) as SnapshotKey),
     ] as const)
+    sessionCheckCount.current += 1
     setCheckingSessions(true)
     setSessions((current) => {
       const next = { ...current }
@@ -176,7 +180,8 @@ export function useAggregatorController() {
         return next
       })
     } finally {
-      setCheckingSessions(false)
+      sessionCheckCount.current = Math.max(0, sessionCheckCount.current - 1)
+      setCheckingSessions(sessionCheckCount.current > 0)
     }
   }, [])
 
@@ -244,7 +249,7 @@ export function useAggregatorController() {
 
   const handleSubmit = async () => {
     const text = prompt.trim()
-    if (!text || busy) return
+    if (!text || busy || operationGate.isLocked) return
 
     const hasPreviousResults = MODEL_IDS.some(
       (model) => results[model].status === 'done' || results[model].status === 'error',
@@ -255,6 +260,7 @@ export function useAggregatorController() {
       )
       if (!confirmed) return
     }
+    if (!operationGate.tryAcquire()) return
 
     setSending(true)
     setGlobalError('')
@@ -291,13 +297,14 @@ export function useAggregatorController() {
         return next
       })
     } finally {
+      operationGate.release()
       setSending(false)
     }
   }
 
   const retryModel = async (model: ModelId) => {
     const text = lastSubmittedPrompt || prompt.trim()
-    if (!text || busy) return
+    if (!text || busy || !operationGate.tryAcquire()) return
     setGlobalError('')
     setResults((current) => ({
       ...current,
@@ -317,11 +324,13 @@ export function useAggregatorController() {
           updatedAt: Date.now(),
         },
       }))
+    } finally {
+      operationGate.release()
     }
   }
 
   const handleSynthesize = async () => {
-    if (busy || doneCount === 0 || !lastSubmittedPrompt) return
+    if (busy || doneCount === 0 || !lastSubmittedPrompt || !operationGate.tryAcquire()) return
     setSynthesizing(true)
     setSynthError('')
     setSynthText('')
@@ -347,6 +356,7 @@ export function useAggregatorController() {
     } catch (error) {
       setSynthError(cleanError(error))
     } finally {
+      operationGate.release()
       setSynthesizing(false)
     }
   }
