@@ -91,7 +91,44 @@ function authenticate(wsUrl, origin, token) {
   })
 }
 
+test('rejects WebSocket messages larger than the bridge payload limit', async (t) => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'multi-ai-payload-test-'))
+  const port = await getAvailablePort()
+  const previousPort = process.env.AGGREGATOR_ZEN_PORT
+  process.env.AGGREGATOR_ZEN_PORT = String(port)
+  const bridge = new ZenBridge(dataDir, () => {})
+  await bridge.start()
+  const connection = bridge.getZenConnection()
+  const socket = new WebSocket(connection.wsUrl, {
+    origin: 'moz-extension://a1b2c3d4-1111-2222-3333-abcdefabcdef',
+  })
+
+  t.after(async () => {
+    socket.terminate()
+    await bridge.close()
+    if (previousPort === undefined) delete process.env.AGGREGATOR_ZEN_PORT
+    else process.env.AGGREGATOR_ZEN_PORT = previousPort
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const closeCode = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Oversized payload was not rejected.')), 4000)
+    socket.once('open', () => socket.send('x'.repeat(1024 * 1024 + 1)))
+    socket.once('close', (code) => {
+      clearTimeout(timer)
+      resolve(code)
+    })
+    socket.once('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+  })
+
+  assert.equal(closeCode, 1009)
+})
+
 test('persists the first authenticated extension origin across bridge restarts', async (t) => {
+
   const dataDir = mkdtempSync(path.join(tmpdir(), 'multi-ai-origin-test-'))
   const port = await getAvailablePort()
   const previousPort = process.env.AGGREGATOR_ZEN_PORT

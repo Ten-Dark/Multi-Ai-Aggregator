@@ -200,7 +200,11 @@ export class ZenBridge {
       const httpServer = http.createServer((request, response) => {
         this.handleHttp(request, response)
       })
-      const server = new WebSocketServer({ server: httpServer })
+      const server = new WebSocketServer({
+        server: httpServer,
+        maxPayload: 1 * 1024 * 1024,
+        perMessageDeflate: false,
+      })
       try {
         await new Promise<void>((resolve, reject) => {
           const onListening = (): void => {
