@@ -26,6 +26,16 @@ export function isTrustedIpcSender(input: IpcSenderTrustInput): boolean {
 
   if (input.isPackaged) return url.protocol === 'file:'
 
+  if (url.protocol === 'file:') {
+    return (
+      url.pathname.endsWith('/dist-electron/renderer/index.html') &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    )
+  }
+
   return (
     url.protocol === 'http:' &&
     url.hostname === 'localhost' &&

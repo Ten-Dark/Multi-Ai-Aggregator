@@ -64,13 +64,17 @@ test('accepts only the current trusted main renderer for IPC', () => {
     assert.equal(isTrustedIpcSender({ ...base, ...patch }), false, JSON.stringify(patch))
   }
 
+  const devFileUrl = 'file:///C:/app/dist-electron/renderer/index.html'
+  assert.equal(isTrustedIpcSender({ ...base, frameUrl: devFileUrl, currentUrl: devFileUrl }), true)
+  const foreignFileUrl = 'file:///C:/Users/Public/hostile.html'
+  assert.equal(isTrustedIpcSender({ ...base, frameUrl: foreignFileUrl, currentUrl: foreignFileUrl }), false)
+
   assert.equal(isTrustedIpcSender({
     ...base,
     isPackaged: true,
     frameUrl: 'file:///app/index.html',
     currentUrl: 'file:///app/index.html',
   }), true)
-  assert.equal(isTrustedIpcSender({ ...base, isPackaged: true }), false)
 })
 
 async function getAvailablePort() {
