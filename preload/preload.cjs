@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld('aggregator', {
   focusModel: (model) => ipcRenderer.invoke('aggregator:focusModel', model),
   sendAll: (prompt) => ipcRenderer.invoke('aggregator:sendAll', prompt),
   sendOne: (model, prompt) => ipcRenderer.invoke('aggregator:sendOne', model, prompt),
+  cancelTask: (taskId) => ipcRenderer.invoke('aggregator:cancelTask', taskId),
+  cancelBatch: (batchId) => ipcRenderer.invoke('aggregator:cancelBatch', batchId),
   synthesize: (request) => ipcRenderer.invoke('aggregator:synthesize', request),
   copyText: (text) => ipcRenderer.invoke('aggregator:copyText', text),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),

@@ -103,6 +103,8 @@ export interface AggregatorApi {
   focusModel: (model: ModelId) => Promise<void>
   sendAll: (prompt: string) => Promise<ModelResult[]>
   sendOne: (model: ModelId, prompt: string) => Promise<ModelResult>
+  cancelTask: (taskId: TaskId) => Promise<{ accepted: boolean; confirmed?: boolean; status?: string }>
+  cancelBatch: (batchId: TaskId) => Promise<{ accepted: number; rejected: number }>
   synthesize: (request: SynthesisRequest) => Promise<SynthesisResult>
   copyText: (text: string) => Promise<void>
   getAppVersion: () => Promise<string>

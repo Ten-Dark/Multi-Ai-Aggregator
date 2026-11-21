@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import http, { type IncomingMessage, type ServerResponse } from 'node:http'
@@ -14,6 +14,7 @@ import {
   type SynthesisRequest,
   type SynthesisResult,
   type TaskErrorCode,
+  type TaskId,
   type ZenConnectionInfo,
 } from '../../shared/types.js'
 import { buildSynthesisPrompt } from '../synthesis/prompt.js'
@@ -25,6 +26,7 @@ import {
   type ZenProgressMessage,
   type ZenResponseMessage,
 } from './protocol.js'
+import { TaskRegistry, type ActiveTask } from './task-registry.js'
 
 const DEFAULT_PORT = 45123
 const PORT_ATTEMPTS = 12
@@ -85,6 +87,7 @@ export class ZenBridge {
   private started = false
   private startPromise: Promise<BrowserInfo> | null = null
   private info: BrowserInfo = { status: 'stopped', browserName: 'Zen Browser' }
+  private readonly taskRegistry = new TaskRegistry()
   private running = new Set<ModelId>()
   private progressModels = new Set<ModelId>()
   private pending = new Map<string, PendingCommand>()
@@ -370,6 +373,15 @@ export class ZenBridge {
         this.extensionVersion = undefined
         const message = 'Расширение Zen отключилось. Ожидание повторного подключения…'
         this.setInfo({ status: 'starting', browserName: 'Zen Browser', message })
+        const unconfirmedCancellations = this.taskRegistry.finalizeCancelling((task) => ({
+          model: task.model,
+          taskId: task.taskId,
+          batchId: task.batchId,
+          status: 'cancelled',
+          error: 'Расширение отключилось до подтверждения отмены; локальная задача закрыта.',
+          updatedAt: Date.now(),
+        }))
+        for (const result of unconfirmedCancellations) this.emit({ type: 'model', result })
         this.rejectPending(new BridgeError('browser', message))
       }
     })
@@ -409,11 +421,24 @@ export class ZenBridge {
 
   private handleProgress(message: ZenProgressMessage): void {
     if (this.synthesisActive) return
-    const { model, phase } = message
+    const { model, phase, taskId } = message
     if (!this.progressModels.has(model)) return
+
+    const task = taskId
+      ? this.taskRegistry.get(taskId)
+      : this.taskRegistry.getByModel(model)
+    if (taskId && (!task || task.model !== model)) return
+    if (task && !this.taskRegistry.setStatus(task.taskId, phase)) return
+
     this.emit({
       type: 'model',
-      result: { model, status: message.phase, updatedAt: Date.now() },
+      result: {
+        model,
+        taskId: task?.taskId,
+        batchId: task?.batchId,
+        status: phase,
+        updatedAt: Date.now(),
+      },
     })
   }
 
@@ -566,12 +591,25 @@ export class ZenBridge {
     }
     if (!prompt.trim()) throw new Error('Запрос пуст.')
 
+    const batchId = randomUUID()
+    const taskIds = new Map(MODEL_IDS.map((model) => [model, randomUUID()]))
     this.batchActive = true
     try {
       for (const model of MODEL_IDS) {
-        this.emit({ type: 'model', result: { model, status: 'queued', updatedAt: Date.now() } })
+        this.emit({
+          type: 'model',
+          result: {
+            model,
+            taskId: taskIds.get(model),
+            batchId,
+            status: 'queued',
+            updatedAt: Date.now(),
+          },
+        })
       }
-      return await Promise.all(MODEL_IDS.map((model) => this.sendOneInternal(model, prompt)))
+      return await Promise.all(
+        MODEL_IDS.map((model) => this.sendOneInternal(model, prompt, taskIds.get(model)!, batchId)),
+      )
     } finally {
       this.batchActive = false
     }
@@ -585,13 +623,124 @@ export class ZenBridge {
       throw new Error(`${MODEL_LABELS[model]} уже выполняет запрос. Дождитесь завершения.`)
     }
     if (!prompt.trim()) throw new Error('Запрос пуст.')
-    return this.sendOneInternal(model, prompt)
+    return this.sendOneInternal(model, prompt, randomUUID())
   }
 
-  private async sendOneInternal(model: ModelId, prompt: string): Promise<ModelResult> {
+  async cancelTask(taskId: TaskId): Promise<{ accepted: boolean; confirmed?: boolean; status?: string }> {
+    const task = this.taskRegistry.get(taskId)
+    if (!task) return { accepted: false, status: 'not-found' }
+    if (['done', 'error', 'cancelled'].includes(task.status)) {
+      return { accepted: false, confirmed: task.cancelConfirmed, status: task.status }
+    }
+    if (task.cancelPromise) {
+      return {
+        accepted: await task.cancelPromise,
+        confirmed: task.cancelConfirmed,
+        status: task.status,
+      }
+    }
+
+    const cancellingTask = this.taskRegistry.beginCancellation(taskId)
+    if (!cancellingTask) return { accepted: false, status: task.status }
+    this.emit({
+      type: 'model',
+      result: {
+        model: task.model,
+        taskId: task.taskId,
+        batchId: task.batchId,
+        status: 'cancelling',
+        updatedAt: Date.now(),
+      },
+    })
+
+    const cancelPromise = this.sendCommand('cancelTask', { taskId }, 10_000)
+      .then((data) => {
+        const acknowledged =
+          Boolean(data) &&
+          typeof data === 'object' &&
+          (data as Record<string, unknown>).taskId === taskId &&
+          (data as Record<string, unknown>).cancelled === true
+        if (!acknowledged) {
+          this.taskRegistry.restoreAfterCancellationFailure(taskId)
+          this.emitTaskStatus(task, task.status)
+          return false
+        }
+
+        const result: ModelResult = {
+          model: task.model,
+          taskId: task.taskId,
+          batchId: task.batchId,
+          status: 'cancelled',
+          error: 'Запрос отменён.',
+          updatedAt: Date.now(),
+        }
+        const finalized = this.taskRegistry.finishCancelled(taskId, result)
+        if (finalized) this.emit({ type: 'model', result: finalized })
+        return Boolean(finalized)
+      })
+      .catch((error: unknown) => {
+        if (task.result?.status === 'cancelled') return true
+        if (error instanceof BridgeError && (error.code === 'timeout' || error.code === 'browser')) {
+          const result: ModelResult = {
+            model: task.model,
+            taskId: task.taskId,
+            batchId: task.batchId,
+            status: 'cancelled',
+            error: 'Отмена не подтверждена расширением; локальная задача закрыта.',
+            updatedAt: Date.now(),
+          }
+          const finalized = this.taskRegistry.finishCancelled(taskId, result, false)
+          if (finalized) this.emit({ type: 'model', result: finalized })
+          return Boolean(finalized)
+        }
+        this.taskRegistry.restoreAfterCancellationFailure(taskId)
+        this.emitTaskStatus(task, task.status)
+        console.warn('[zen-bridge] Task cancellation was not acknowledged:', error)
+        return false
+      })
+      .finally(() => {
+        task.cancelPromise = undefined
+      })
+
+    task.cancelPromise = cancelPromise
+    return { accepted: await cancelPromise, confirmed: task.cancelConfirmed, status: task.status }
+  }
+
+  async cancelBatch(batchId: TaskId): Promise<{ accepted: number; rejected: number }> {
+    const tasks = this.taskRegistry.getBatch(batchId).filter(
+      (task) => !['done', 'error', 'cancelled'].includes(task.status),
+    )
+    const outcomes = await Promise.all(tasks.map((task) => this.cancelTask(task.taskId)))
+    return {
+      accepted: outcomes.filter((outcome) => outcome.accepted).length,
+      rejected: outcomes.filter((outcome) => !outcome.accepted).length,
+    }
+  }
+
+  private emitTaskStatus(task: ActiveTask, status: ActiveTask['status']): void {
+    this.emit({
+      type: 'model',
+      result: {
+        model: task.model,
+        taskId: task.taskId,
+        batchId: task.batchId,
+        status,
+        updatedAt: Date.now(),
+      },
+    })
+  }
+
+  private async sendOneInternal(
+    model: ModelId,
+    prompt: string,
+    taskId: TaskId = randomUUID(),
+    batchId?: TaskId,
+  ): Promise<ModelResult> {
     if (this.running.has(model)) {
       return {
         model,
+        taskId,
+        batchId,
         status: 'error',
         error: `${MODEL_LABELS[model]} уже выполняет запрос.`,
         errorCode: 'busy',
@@ -599,14 +748,18 @@ export class ZenBridge {
       }
     }
 
+    const task: ActiveTask = { taskId, batchId, model, status: 'opening' }
+    this.taskRegistry.register(task)
     this.running.add(model)
     this.progressModels.add(model)
-    this.emit({ type: 'model', result: { model, status: 'opening', updatedAt: Date.now() } })
+    this.emitTaskStatus(task, 'opening')
 
     try {
       const data = await this.sendCommand(
         'send',
         {
+          taskId,
+          batchId,
           model,
           prompt,
           timeoutMs: RESPONSE_TIMEOUT_MS,
@@ -621,18 +774,51 @@ export class ZenBridge {
       if (!text) {
         throw new BridgeError('site', `${MODEL_LABELS[model]}: сервис вернул пустой ответ.`)
       }
-      const result: ModelResult = { model, status: 'done', text, updatedAt: Date.now() }
-      this.emit({ type: 'model', result })
-      return result
+
+      const result: ModelResult = {
+        model,
+        taskId,
+        batchId,
+        status: 'done',
+        text,
+        updatedAt: Date.now(),
+      }
+      const finalized = this.taskRegistry.finish(taskId, result)
+      if (finalized) {
+        this.emit({ type: 'model', result: finalized })
+        return finalized
+      }
+      if (task.cancelPromise) await task.cancelPromise
+      if (task.result) return task.result
+      const recovered = this.taskRegistry.finish(taskId, result)
+      if (recovered) {
+        this.emit({ type: 'model', result: recovered })
+        return recovered
+      }
+      return task.result ?? result
     } catch (error) {
-      const result = this.errorResult(model, error)
-      this.emit({ type: 'model', result })
-      return result
+      const result: ModelResult = { ...this.errorResult(model, error), taskId, batchId }
+      const finalized = this.taskRegistry.finish(taskId, result)
+      if (finalized) {
+        this.emit({ type: 'model', result: finalized })
+        return finalized
+      }
+      if (task.cancelPromise) await task.cancelPromise
+      if (task.result) return task.result
+      const recovered = this.taskRegistry.finish(taskId, result)
+      if (recovered) {
+        this.emit({ type: 'model', result: recovered })
+        return recovered
+      }
+      return task.result ?? result
     } finally {
       this.running.delete(model)
       this.progressModels.delete(model)
+      this.taskRegistry.remove(taskId)
     }
   }
+
+
 
   private errorResult(model: ModelId, error: unknown): ModelResult {
     if (error instanceof BridgeError) {
@@ -700,6 +886,15 @@ export class ZenBridge {
       clearInterval(this.heartbeat)
       this.heartbeat = null
     }
+    const shutdownResults = this.taskRegistry.cancelAll((task) => ({
+      model: task.model,
+      taskId: task.taskId,
+      batchId: task.batchId,
+      status: 'cancelled',
+      error: 'Приложение закрывается; удалённое подтверждение отмены не получено.',
+      updatedAt: Date.now(),
+    }))
+    for (const result of shutdownResults) this.emit({ type: 'model', result })
     this.rejectPending(new BridgeError('browser', 'Приложение закрывается.'))
     this.authenticated = false
     this.socket = null

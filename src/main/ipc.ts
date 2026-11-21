@@ -2,6 +2,7 @@ import { app, clipboard, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { MODEL_IDS, type ModelId, type SynthesisRequest } from '../shared/types.js'
 import { getMainWindow } from './window.js'
 import type { ZenBridge } from './zen/bridge.js'
+import { isTaskId } from './zen/protocol.js'
 import { isTrustedIpcSender } from './ipc-security.js'
 
 const MAX_PROMPT_CHARS = 300_000
@@ -137,6 +138,18 @@ export function registerAggregatorIpc(getBridge: () => ZenBridge): void {
     assertModel(model)
     assertPrompt(prompt)
     return getBridge().sendOne(model, prompt)
+  })
+
+  ipcMain.handle('aggregator:cancelTask', async (event, taskId: unknown) => {
+    assertTrustedSender(event)
+    if (!isTaskId(taskId)) throw new Error('Некорректный идентификатор задачи.')
+    return getBridge().cancelTask(taskId)
+  })
+
+  ipcMain.handle('aggregator:cancelBatch', async (event, batchId: unknown) => {
+    assertTrustedSender(event)
+    if (!isTaskId(batchId)) throw new Error('Некорректный идентификатор группы задач.')
+    return getBridge().cancelBatch(batchId)
   })
 
   ipcMain.handle('aggregator:synthesize', async (event, request: unknown) => {

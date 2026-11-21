@@ -1,6 +1,6 @@
 # Cancellation Protocol
 
-Status: proposed design  
+Status: Stage 2 implemented; Extension integration is next
 Scope: Electron Renderer, Main Process, Zen WebSocket Bridge, Zen Extension  
 Compatibility: additive protocol revision; no change to authentication or extension-origin pinning
 
@@ -8,7 +8,6 @@ Compatibility: additive protocol revision; no change to authentication or extens
 
 Implement cooperative cancellation for:
 - one model request;
-- one synthesis request;
 - an entire batch request.
 
 The protocol must guarantee:
@@ -25,11 +24,11 @@ The protocol must guarantee:
 
 ## 2. Identifiers and ownership
 
-Renderer creates an opaque operation ID before invoking IPC (UUID v4). Main validates its shape and uniqueness.
+Main creates cryptographically random UUID v4 identifiers before dispatching work.
 
-- Single model request: operation ID is also its task ID.
-- Synthesis: operation ID identifies the synthesis task.
-- Batch: operation ID is the batch ID; Main derives a distinct task ID for each model, or creates one using a cryptographically random UUID.
+- Single model request: Main generates its task ID.
+- Batch: Main generates a batch ID and a distinct task ID for each model.
+- Renderer receives identifiers through validated model events and uses them only to request cancellation.
 
 Main owns:
 - active task registry;
@@ -83,6 +82,7 @@ Start command adds a required task identifier:
   "action": "send",
   "payload": {
     "taskId": "opaque-task-id",
+    "batchId": "opaque-batch-id",
     "model": "chatgpt",
     "prompt": "...",
     "timeoutMs": 240000,
@@ -194,12 +194,16 @@ Add:
 - a typed cancellation event or model event carrying the new task status;
 - `cancelTask(taskId)` and `cancelBatch(batchId)` to AggregatorApi.
 
+`cancelTask` returns `accepted`, `status`, and `confirmed`. A cancelled task with
+`confirmed: false` means Main closed the local operation after timeout/disconnect;
+it does not prove that remote automation stopped.
+
 IPC handlers must use the existing trusted-sender assertion and strict ID validation. Preload must validate the new task statuses, IDs and cancellation event payloads. Do not expose the raw WebSocket bridge or arbitrary command dispatch to Renderer.
 
 ## 8. Renderer behavior
 
-- Generate operation IDs before calling `sendOne`, `sendAll`, or `synthesize`.
-- Keep active operation IDs in refs so cancellation works before React re-renders.
+- Read task and batch IDs from Main Process model events.
+- Keep active IDs in refs so cancellation works before React re-renders.
 - Show a Cancel button while a task/batch is active.
 - For a batch, show one Cancel all action and preserve per-model terminal results.
 - For a single model retry, show cancellation on that model only.
@@ -258,9 +262,9 @@ IPC handlers must use the existing trusted-sender assertion and strict ID valida
 
 ## 11. Implementation sequence
 
-1. Shared types, ID validation, protocol schema and deterministic unit tests.
-2. Main task registry, terminal arbitration, cancellation commands and IPC surface.
-3. Extension background task registry and cancellation routing.
+1. Shared types, ID validation, protocol schema and deterministic unit tests. (Complete.)
+2. Main task registry, terminal arbitration, cancellation commands and IPC surface. (Complete.)
+3. Extension background task registry and cancellation routing. (Next.)
 4. Content-script AbortSignal support and cancellation checkpoints.
 5. Renderer controls, state presentation and stale-event protection.
 6. Full regression: typecheck, all security/integration tests, packaging, packaged smoke test.
