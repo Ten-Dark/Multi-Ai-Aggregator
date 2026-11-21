@@ -34,6 +34,7 @@
         'button[data-testid="stop-button"]',
       ],
       loggedOutSelectors: ['button[data-login-button]', 'button[data-testid="login-button"]'],
+      loggedInSelectors: ['[data-testid="accounts-profile-button"]', 'button[aria-label*="Open profile menu" i]'],
       loginPageUrlPatterns: [/\/auth\/login/i, /\/auth\/signup/i, /auth\.openai\.com/i],
       loginFormSelectors: ['input[type="password"]'],
       completion: 'attribute',
@@ -64,6 +65,7 @@
       contentSelectors: ['.custom-qwen-markdown', '.qwen-markdown'],
       stopSelectors: ['button.stop-button', '.stop-button', '[class*="stop-button"]', 'button[aria-label*="Stop" i]'],
       loggedOutSelectors: ['button.header-right-auth-button'],
+      loggedInSelectors: ['[class*="user-avatar"]', 'button[aria-label*="profile" i]', 'button[aria-label*="account" i]'],
       loginPageUrlPatterns: [/\/login/i, /\/signin/i, /\/sign-in/i],
       loginFormSelectors: ['input[type="password"]'],
       completion: 'stable',
@@ -107,7 +109,14 @@
         '[class*="stop-button"]',
         '.ds-message-loading',
       ],
-      loggedOutSelectors: [],
+      loggedOutSelectors: [
+        'button[aria-label*="Log in" i]',
+        'button[aria-label*="Sign in" i]',
+        'a[href*="/sign_in"]',
+        'a[href*="/login"]',
+        '[class*="login-button"]',
+      ],
+      loggedInSelectors: ['img[src*="static.deepseek.com/user-avatar"]', '[class*="user-avatar"]'],
       loginPageUrlPatterns: [/\/sign_in/i, /\/login/i, /\/signin/i],
       loginFormSelectors: ['input[type="password"]'],
       completion: 'stable',
@@ -276,6 +285,7 @@
       composerVisible: anyVisible(adapter.composerSelectors),
       loginFormVisible: anyVisible(adapter.loginFormSelectors),
       loggedOutVisible: anyVisible(adapter.loggedOutSelectors),
+      loggedInVisible: anyVisible(adapter.loggedInSelectors),
     }
   }
 
@@ -363,6 +373,13 @@
       if (blocker) return sessionForBlocker(blocker, page)
       if (page.composerVisible) {
         if (page.loggedOutVisible) {
+          if (!adapter.guestAllowed) {
+            return {
+              status: 'login-required',
+              message: 'Требуется вход в аккаунт для работы с этим сервисом.',
+              url: page.url,
+            }
+          }
           return {
             status: 'guest',
             message: adapter.guestAllowed
@@ -371,7 +388,14 @@
             url: page.url,
           }
         }
-        return { status: 'logged-in', message: 'Вход выполнен.', url: page.url }
+        if (page.loggedInVisible) {
+          return { status: 'logged-in', message: 'Вход подтверждён по элементам профиля.', url: page.url }
+        }
+        return {
+          status: 'unknown',
+          message: 'Поле ввода доступно, но интерфейс не подтвердил состояние аккаунта.',
+          url: page.url,
+        }
       }
       if (page.loginFormVisible) {
         return { status: 'login-required', message: 'Требуется вход в аккаунт.', url: page.url }

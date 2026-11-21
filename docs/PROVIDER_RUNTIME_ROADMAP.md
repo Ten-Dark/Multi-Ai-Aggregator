@@ -44,6 +44,7 @@ Tasks:
 - [x] P1.6 Separate overall timeout from provider-specific no-progress timeout.
 - [ ] P1.7 Add extraction-quality gates for empty, stale, error-placeholder, and incomplete responses.
 - [ ] P1.8 Test cleanup of observers, timers, and listeners on success, failure, timeout, disconnect, and cancellation.
+- [ ] P1.9 Validate positive logged-in/logged-out indicators for every provider; keep session state `unknown` when neither is positively established.
 
 Exit criteria: deterministic unit/integration coverage for each transition; no duplicate-send regression; partial results cannot be labelled complete; existing cancellation tests pass.
 

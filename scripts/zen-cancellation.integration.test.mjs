@@ -297,6 +297,67 @@ function createContentHarness() {
   return { dispatch: (message) => listener(message) }
 }
 
+function createSessionHarness({ loggedIn = false, loggedOut = false } = {}) {
+  let listener
+  class FakeElement {
+    constructor() {
+      this.disabled = false
+      this.className = ''
+      this.classList = { contains: () => false }
+    }
+    getAttribute() { return null }
+    getBoundingClientRect() { return { width: 300, height: 40, top: 0, left: 0, right: 300 } }
+  }
+  const composer = new FakeElement()
+  const avatar = new FakeElement()
+  const loginButton = new FakeElement()
+  const document = {
+    title: 'DeepSeek',
+    body: { innerText: '' },
+    querySelectorAll: (selector) => {
+      if (selector === 'textarea#chat-input') return [composer]
+      if (selector === 'img[src*="static.deepseek.com/user-avatar"]') return loggedIn ? [avatar] : []
+      if (selector === 'button[aria-label*="Log in" i]') return loggedOut ? [loginButton] : []
+      return []
+    },
+  }
+  const browser = {
+    runtime: {
+      sendMessage: async () => ({}),
+      onMessage: { addListener: (callback) => { listener = callback } },
+    },
+  }
+  const submissionSource = readFileSync(new URL('../zen-extension/content/submission.js', import.meta.url), 'utf8')
+  const automationSource = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  runInNewContext(`${submissionSource}\n;\n${automationSource}`, {
+    browser,
+    window: { __maiAutomationLoaded: false },
+    location: { hostname: 'chat.deepseek.com', href: 'https://chat.deepseek.com/' },
+    document,
+    getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+    HTMLButtonElement: FakeElement,
+    HTMLTextAreaElement: FakeElement,
+    HTMLInputElement: FakeElement,
+    InputEvent: class InputEvent {},
+    Event: class Event {},
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    Date,
+    Promise,
+    Map,
+    Set,
+    Array,
+    String,
+    Boolean,
+    Error,
+    RegExp,
+    Math,
+    Number,
+  })
+  return { inspect: (timeoutMs = 1000) => listener({ type: 'mai:inspect', timeoutMs }) }
+}
+
 function createSubmittedContentHarness({ staleResponse = false } = {}) {
   let listener
   let submitted = false
@@ -483,4 +544,22 @@ test('content automation ignores a late assistant node that precedes the current
   assert.equal(cancellation.cancelled, true)
   assert.equal(result.error.code, 'cancelled')
   assert.equal(harness.clickCount, 1)
+})
+
+test('session inspection does not infer DeepSeek login from composer visibility alone', async () => {
+  const result = await createSessionHarness().inspect()
+  assert.equal(result.ok, true)
+  assert.equal(result.session.status, 'unknown')
+})
+
+test('session inspection requires positive DeepSeek profile evidence for logged-in status', async () => {
+  const result = await createSessionHarness({ loggedIn: true }).inspect()
+  assert.equal(result.ok, true)
+  assert.equal(result.session.status, 'logged-in')
+})
+
+test('session inspection classifies an explicit DeepSeek login control as login-required', async () => {
+  const result = await createSessionHarness({ loggedOut: true }).inspect()
+  assert.equal(result.ok, true)
+  assert.equal(result.session.status, 'login-required')
 })

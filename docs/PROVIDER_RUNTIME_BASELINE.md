@@ -40,8 +40,9 @@ After recording the initial baseline, the first reliability slice was implemente
 - Response collection now requires a newly added assistant node to appear after the latest user message, whose normalized text must exactly match the current prompt. A delayed answer that appears before the current prompt in DOM order is ignored.
 - Separate provider no-progress deadlines were added (35 seconds for Qwen; 45 seconds for ChatGPT and DeepSeek). A stalled response is classified as timeout/partial rather than silently treated as complete.
 - Selector provenance is provisional: Qwen's `.user-message-content` is based on community DOM observations ([reference](https://greasyfork.org/en/scripts/588050-qwen-chat-markdown-latex-renderer-user-messages)); DeepSeek's `div.fbb737a4` is based on a community live-DOM capture ([reference](https://github.com/NIyueeE/deepseek-user-message-renderer)). These are not official provider contracts and require validation in the authenticated Zen profile.
+- Session inspection no longer labels a visible composer as `logged-in` by default. It requires a positive profile indicator, returns `unknown` when evidence is inconclusive, and treats an explicit login control as `guest` or `login-required` according to provider policy. DeepSeek's positive profile selectors are provisional community-observed selectors and still require live-profile validation.
 - A reproducible `npm run build:extension` command now builds `release/zen-extension/multi-ai-aggregator-zen-<version>.xpi`, extracts it into a temporary directory, and checks its manifest and required content scripts. The XPI build passed for version `0.3.0`.
-- Latest validation: `npm run test:security` **PASS, 64/64**; `npm run typecheck` **PASS**; `npm run pack` **PASS**; `npm run build:extension` **PASS** (XPI `0.3.0`); `npm audit --omit=dev` **0 vulnerabilities**; `git diff --check` **PASS**.
+- Latest validation: `npm run test:security` **PASS, 67/67**; `npm run typecheck` **PASS**; `npm run pack` **PASS** (latest Electron package build before the session-indicator-only change); `npm run build:extension` **PASS** (XPI `0.3.0`); `npm audit --omit=dev` **0 vulnerabilities**; `git diff --check` **PASS**.
 - Full `npm audit` still reports six moderate development-toolchain findings in `electron-builder` / `@electron/universal` / `minimatch`; the available automatic fix requires a breaking `electron-builder` downgrade and was not applied.
 - The packaged smoke script was not run after this change because it launches against the real Windows user-data directory and would rotate the active local pairing token. Actual profile migration is pending the next launch of the updated app; the isolated Windows migration test passes.
 
@@ -61,7 +62,7 @@ This closes the blind-retry defect, exact-fill check, and implements Windows tok
 
 1. **Response correlation requires live-provider validation — P1.** Prompt matching and DOM-order correlation are implemented and stale-response regression-tested, but Qwen/DeepSeek selectors come from community observations and are not yet verified against the user's authenticated Zen pages.
 2. **Completion detection still needs provider E2E — P1.** Separate no-progress deadlines are implemented, but completion still combines provider stop controls, response stability, and the ChatGPT completion attribute; each provider's behavior must be validated against real streaming sessions.
-3. **Authentication detection is weak — P1.** DeepSeek has no positive logged-out selectors; a visible composer with no detected login marker is treated as logged in. Similar absence-of-logout inference exists for other providers.
+3. **Authentication selector validation remains open — P1.** The false-positive `logged-in` fallback is removed and inconclusive states remain `unknown`. Provider profile/login selectors have not yet been validated against all authenticated pages in the user's Zen profile.
 
 ## Readiness blockers and required evidence
 
@@ -73,7 +74,7 @@ This closes the blind-retry defect, exact-fill check, and implements Windows tok
 | P1 | Verify exact composer contents | **Implemented and tested**; line endings and NBSP normalized, all other text differences rejected. |
 | P1 | Correlate responses to the current user turn | **Implemented and regression-tested for DOM ordering.** Real Qwen/DeepSeek selector validation remains pending. |
 | P1 | Improve completion and no-progress detection | **No-progress deadlines implemented.** Provider-specific multi-signal completion tests remain pending. |
-| P1 | Positive session-state evidence | Logged-in/guest/login-required states are based on positive provider signals, with unknown kept distinct. |
+| P1 | Positive session-state evidence | **Conservative unknown state implemented and unit-tested.** Live validation of profile/login selectors for all providers remains pending. |
 | P1 | Extension distribution and pairing workflow | Reproducible XPI build/version check and documented user-controlled update/pairing steps. |
 | P1 | Real authenticated E2E | User-approved pairing and manual verification for each supported provider; report each provider separately. |
 
