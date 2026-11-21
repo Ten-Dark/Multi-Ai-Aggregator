@@ -71,6 +71,7 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
       update: async () => ({}),
     },
     tabs: {
+      query: async () => [...tabById.values()],
       get: async (id) => tabById.get(id),
       update: async (id, changes) => {
         const tab = tabById.get(id)
@@ -79,6 +80,7 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
       },
       sendMessage: async (tabId, message) => {
         if (message.type === 'mai:ping') return { ok: true }
+        if (message.type === 'mai:inspect') return { ok: true, session: { status: 'logged-in', message: 'Session active.' } }
         if (message.type === 'mai:send') {
           if (completeImmediately) return { ok: true, taskId: message.taskId, text: 'completed answer' }
           return new Promise((resolve) => { pendingSend = { resolve, tabId, message } })
@@ -154,6 +156,17 @@ async function waitForResponse(socket, id) {
   await waitFor(() => socket.sent.some((message) => message.type === 'response' && message.id === id))
   return socket.sent.find((message) => message.type === 'response' && message.id === id)
 }
+test('session check discovers an already-open provider tab without creating another tab', async () => {
+  MockWebSocket.instances = []
+  const harness = createBackgroundHarness()
+  const socket = await connectBackground(harness)
+  command(socket, 'check-sessions', 'checkSessions', {})
+  const response = await waitForResponse(socket, 'check-sessions')
+  assert.equal(response.ok, true)
+  assert.equal(response.data.find((session) => session.model === 'qwen')?.status, 'logged-in')
+  assert.equal(harness.values.get('maiTabs').tabs.qwen, 101)
+})
+
 
 test('background routes cancellation to the matching tab and waits for automation settlement', async () => {
   MockWebSocket.instances = []
@@ -255,6 +268,7 @@ function createContentHarness() {
   let listener
   const browser = {
     runtime: {
+      getManifest: () => ({ version: '0.3.1' }),
       sendMessage: async () => ({}),
       onMessage: { addListener: (callback) => { listener = callback } },
     },
@@ -323,6 +337,7 @@ function createSessionHarness({ loggedIn = false, loggedOut = false } = {}) {
   }
   const browser = {
     runtime: {
+      getManifest: () => ({ version: '0.3.1' }),
       sendMessage: async () => ({}),
       onMessage: { addListener: (callback) => { listener = callback } },
     },
@@ -416,9 +431,11 @@ function createSubmittedContentHarness({ staleResponse = false } = {}) {
   const browser = {
     runtime: {
       sendMessage: async () => ({}),
+      getManifest: () => ({ version: '0.3.1' }),
       onMessage: { addListener: (callback) => { listener = callback } },
     },
   }
+
   const submissionSource = readFileSync(new URL('../zen-extension/content/submission.js', import.meta.url), 'utf8')
   const automationSource = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
   const source = `${submissionSource}\n;\n${automationSource}`

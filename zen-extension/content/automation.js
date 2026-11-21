@@ -4,8 +4,16 @@
   const host = location.hostname
   const MODEL = host === 'chatgpt.com' ? 'chatgpt' : host === 'chat.qwen.ai' ? 'qwen' : host === 'chat.deepseek.com' ? 'deepseek' : null
   if (!MODEL) return
-  if (window.__maiAutomationLoaded) return
-  window.__maiAutomationLoaded = true
+  const EXTENSION_VERSION = browser.runtime.getManifest().version
+  if (window.__maiAutomationVersion === EXTENSION_VERSION) return
+  if (typeof window.__maiAutomationListener === 'function') {
+    try {
+      browser.runtime.onMessage.removeListener(window.__maiAutomationListener)
+    } catch {
+      // The previous extension context may already be gone.
+    }
+  }
+  window.__maiAutomationVersion = EXTENSION_VERSION
 
   const ADAPTERS = {
     chatgpt: {
@@ -791,7 +799,7 @@
     while (map.size > RUN_HISTORY_LIMIT) map.delete(map.keys().next().value)
   }
 
-  browser.runtime.onMessage.addListener((message) => {
+  const messageListener = (message) => {
     if (!message || typeof message.type !== 'string') return undefined
 
     if (message.type === 'mai:ping') {
@@ -869,5 +877,7 @@
     }
 
     return undefined
-  })
+  }
+  browser.runtime.onMessage.addListener(messageListener)
+  window.__maiAutomationListener = messageListener
 })()

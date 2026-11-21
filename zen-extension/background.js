@@ -297,63 +297,84 @@ function clampTimeout(value, fallback) {
 
 async function executeAction(action, payload) {
   if (action === 'open') {
-    const state = await ensureTabs()
-    await focusWindow(state.windowId)
-    await activateTab(state.tabs.chatgpt)
-    return { opened: true }
+    const tabs = await discoverProviderTabs()
+    const existingId = tabs.chatgpt || tabs.qwen || tabs.deepseek
+    let windowId = null
+    if (existingId) {
+      const existingTab = await browser.tabs.get(existingId).catch(() => null)
+      windowId = existingTab?.windowId ?? null
+    }
+
+    if (!existingId) {
+      const createdWindow = await browser.windows.create({ focused: false })
+      windowId = createdWindow.id
+    }
+
+    for (const model of MODELS) {
+      if (tabs[model]) continue
+      const createdTab = await browser.tabs.create({
+        ...(windowId !== null ? { windowId } : {}),
+        url: ADAPTERS[model].url,
+        active: false,
+      })
+      tabs[model] = createdTab.id
+      if (windowId === null) windowId = createdTab.windowId
+    }
+
+    await saveTabsState({ ...(await getTabsState()), windowId, tabs })
+    const targetId = tabs.chatgpt || tabs.qwen || tabs.deepseek
+    const targetTab = await browser.tabs.get(targetId).catch(() => null)
+    if (targetTab) {
+      await focusWindow(targetTab.windowId)
+      await activateTab(targetId)
+    }
+    return { opened: true, tabs }
   }
 
   if (action === 'focus') {
+
     const model = assertModel(payload?.model)
-    const state = await ensureTabs()
-    await focusWindow(state.windowId)
-    await activateTab(state.tabs[model])
+    const tabs = await discoverProviderTabs()
+    const tabId = tabs[model]
+    if (!tabId) throw makeError('browser', `Вкладка ${ADAPTERS[model].label} не найдена.`)
+    const tab = await browser.tabs.get(tabId)
+    await focusWindow(tab.windowId)
+    await activateTab(tabId)
     return { focused: true }
   }
 
   if (action === 'checkSessions') {
-    const state = await getTabsState()
-    if (!state) {
-      return MODELS.map((model) => ({
-        model,
-        status: 'unknown',
-        message: 'Вкладки сервисов ещё не созданы. Нажмите «Открыть вкладки в Zen».',
-      }))
-    }
+    const tabs = await discoverProviderTabs()
+    await saveTabsState({ ...(await getTabsState()), tabs })
 
-    const windowInfo = await browser.windows.get(state.windowId).catch(() => null)
-    if (!windowInfo) {
-      return MODELS.map((model) => ({
-        model,
-        status: 'unknown',
-        message: 'Окно сервисов не найдено. Нажмите «Открыть вкладки в Zen».',
-      }))
-    }
-
-    const sessions = await Promise.all(
-      MODELS.map(async (model) => {
-        try {
-          const tabId = state.tabs?.[model]
-          const tab = tabId ? await browser.tabs.get(tabId).catch(() => null) : null
-          if (!tab || tab.windowId !== state.windowId) {
-            return {
-              model,
-              status: 'unknown',
-              message: 'Вкладка сервиса не найдена. Нажмите «Открыть вкладки в Zen».',
-            }
-          }
-          const info = await inspectModelSession(model, tabId)
-          return { model, ...info }
-        } catch (error) {
+    return Promise.all(MODELS.map(async (model) => {
+      const tabId = tabs[model]
+      if (!tabId) {
+        return {
+          model,
+          status: 'unknown',
+          message: `Вкладка ${ADAPTERS[model].label} не найдена. Откройте сайт в Zen или используйте «Открыть сайты».`,
+        }
+      }
+      try {
+        const tab = await browser.tabs.get(tabId).catch(() => null)
+        if (!tab || !isProviderUrl(model, tab.url || '')) {
           return {
             model,
-            status: 'error',
-            message: error instanceof Error ? error.message : `Не удалось проверить ${ADAPTERS[model].label}.`,
+            status: 'unknown',
+            message: 'Вкладка сервиса больше недоступна. Повторите проверку.',
           }
         }
-      }),
-    )
-    return sessions
+        const info = await inspectModelSession(model, tabId)
+        return { model, ...info }
+      } catch (error) {
+        return {
+          model,
+          status: 'error',
+          message: error instanceof Error ? error.message : `Не удалось проверить ${ADAPTERS[model].label}.`,
+        }
+      }
+    }))
   }
 
   if (action === 'send') {
@@ -495,57 +516,45 @@ async function cancelTask(payload) {
 
 async function getTabsState() {
   const data = await browser.storage.local.get(TABS_KEY)
-  return data[TABS_KEY] && typeof data[TABS_KEY] === 'object' ? data[TABS_KEY] : null
+  return data[TABS_KEY] && typeof data[TABS_KEY] === 'object' ? data[TABS_KEY] : { tabs: {} }
 }
 
 async function saveTabsState(state) {
   await browser.storage.local.set({ [TABS_KEY]: state })
 }
 
-async function createTab(windowId, model) {
-  const tab = await browser.tabs.create({
-    windowId,
-    url: ADAPTERS[model].url,
-    active: false,
-  })
-  return tab.id
+function isProviderUrl(model, value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && ADAPTERS[model].hosts.includes(url.hostname)
+  } catch {
+    return false
+  }
 }
 
-let ensureTabsPromise = null
-
-async function ensureTabs() {
-  if (!ensureTabsPromise) {
-    ensureTabsPromise = doEnsureTabs().finally(() => {
-      ensureTabsPromise = null
-    })
-  }
-  return ensureTabsPromise
-}
-
-async function doEnsureTabs() {
-  const state = await getTabsState()
-  if (state?.windowId && state.tabs) {
-    const windowInfo = await browser.windows.get(state.windowId).catch(() => null)
-    if (windowInfo) {
-      const existingTabs = await Promise.all(
-        MODELS.map(async (model) => {
-          const tabId = state.tabs[model]
-          const tab = tabId ? await browser.tabs.get(tabId).catch(() => null) : null
-          return tab && tab.windowId === state.windowId ? tab : null
-        }),
-      )
-      if (existingTabs.every(Boolean)) return state
-    }
-  }
-
-  const created = await browser.windows.create({ focused: false })
-  const nextState = { windowId: created.id, tabs: {} }
+async function discoverProviderTabs() {
+  const [saved, allTabs] = await Promise.all([
+    getTabsState(),
+    browser.tabs.query({}),
+  ])
+  const discovered = {}
   for (const model of MODELS) {
-    nextState.tabs[model] = await createTab(nextState.windowId, model)
+    const savedId = saved.tabs?.[model]
+    const candidates = allTabs.filter((tab) => isProviderUrl(model, tab.url || ''))
+    const selected = candidates.sort((a, b) => {
+      const active = Number(b.active) - Number(a.active)
+      if (active) return active
+      const recentlyUsed = Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0)
+      if (recentlyUsed) return recentlyUsed
+      const readiness = Number(b.status === 'complete') - Number(a.status === 'complete')
+      if (readiness) return readiness
+      return Number(b.id === savedId) - Number(a.id === savedId)
+    })[0]
+    if (selected?.id !== undefined) discovered[model] = selected.id
   }
-  await saveTabsState(nextState)
-  return nextState
+  return discovered
 }
+
 
 async function focusWindow(windowId) {
   await browser.windows.update(windowId, { focused: true }).catch(() => {})
@@ -571,30 +580,72 @@ async function waitForTabLoaded(tabId, timeoutMs, signal) {
 
 async function waitForContent(tabId, timeoutMs = 45_000, signal) {
   const deadline = Date.now() + timeoutMs
+  let injectionAttempted = false
+  let injectionError = null
+  let lastTab = null
+
   while (Date.now() < deadline) {
     throwIfAborted(signal)
+    const tab = await browser.tabs.get(tabId).catch(() => null)
+    if (!tab) throw makeError('browser', 'Вкладка Zen была закрыта.')
+    lastTab = tab
+
+    if (tab.status === 'complete' && !injectionAttempted) {
+      try {
+        const ping = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
+        if (ping?.ok) return
+      } catch {
+        // Existing tabs may predate extension installation or update.
+      }
+
+      injectionAttempted = true
+      try {
+        await browser.tabs.executeScript(tabId, { file: 'content/submission.js' })
+        await browser.tabs.executeScript(tabId, { file: 'content/automation.js' })
+      } catch (error) {
+        injectionError = error
+      }
+    }
+
     try {
       const response = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
       if (response?.ok) return
     } catch {
-      // The content script is not ready yet.
+      // Content script may still be initializing.
+    }
+
+    if (injectionError) {
+      throw makeError(
+        'site',
+        `Не удалось активировать расширение на вкладке ${tab.url}. Проверьте разрешения Zen и перезагрузите эту вкладку вручную.`,
+        injectionError instanceof Error ? injectionError.message : undefined,
+      )
     }
     await delay(300, signal)
   }
+
   throw makeError(
     'site',
-    'Не удалось связаться со страницей сервиса. Откройте вкладку и проверьте, что сайт загрузился.',
+    `Вкладка ${lastTab?.url || 'провайдера'} найдена, но скрипт автоматизации не отвечает. Перезагрузите эту вкладку вручную.`,
   )
 }
-
 async function ensureModelTab(model, options = {}) {
-  const state = await ensureTabs()
   throwIfAborted(options.signal)
-  const tabId = state.tabs[model]
-  if (!tabId) throw makeError('browser', 'Не удалось создать вкладку сервиса.')
-
-  if (options.navigate) {
-    await browser.tabs.update(tabId, { url: ADAPTERS[model].url })
+  const tabs = await discoverProviderTabs()
+  let tabId = tabs[model]
+  if (!tabId) {
+    const state = await getTabsState()
+    const savedWindow = state.windowId
+      ? await browser.windows.get(state.windowId).catch(() => null)
+      : null
+    const created = await browser.tabs.create({
+      ...(savedWindow ? { windowId: savedWindow.id } : {}),
+      url: ADAPTERS[model].url,
+      active: false,
+    })
+    tabId = created.id
+    tabs[model] = tabId
+    await saveTabsState({ ...state, tabs })
     await waitForTabLoaded(tabId, 60_000, options.signal)
   }
 
@@ -679,8 +730,7 @@ async function withTimeout(promise, timeoutMs, message, signal) {
 async function runModelPrompt(model, prompt, timeoutMs, purpose, task) {
   const signal = task.controller.signal
   throwIfAborted(signal)
-  const tabId = await ensureModelTab(model, { navigate: true, signal })
-  throwIfAborted(signal)
+  const tabId = await ensureModelTab(model, { signal })
   task.tabId = tabId
   const label = ADAPTERS[model].label
   let response

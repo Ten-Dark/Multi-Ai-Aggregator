@@ -30,10 +30,13 @@ The application now rotates the legacy bridge token into its protected `userData
 - A successful XPI build does not prove that the extension connects to the app or that provider automation works.
 - Do not automate changes to the user's normal Zen profile. Real-provider E2E must be performed only after the user installs the XPI and completes pairing.
 
-## Browser tab safety
+## Browser connection and tab safety
 
-- Session inspection on application startup is read-only: it checks only previously registered service tabs and does not create windows or tabs.
-- Managed service windows and tabs are created only after an explicit user action (`Open tabs in Zen`) or when the user submits a request that requires them.
-- The extension must never call `browser.tabs.remove()` or `browser.windows.remove()`. It must not close, replace, reorganize, or unpin tabs belonging to the user's normal Zen workspace.
-- The managed service window may contain its own blank initial tab in addition to the three provider tabs. This is intentional; preserving user data takes priority over removing an extra blank tab.
+- Bridge connectivity and provider readiness are separate states. A green extension connection confirms only the local WebSocket pairing; each provider is checked independently.
+- Session checks discover matching ChatGPT, Qwen, and DeepSeek tabs across all Zen windows. They do not require tabs to have been created by the aggregator or to share one browser window.
+- If an existing provider tab predates extension installation/update and has no content script, the extension injects its own scripts into that already-loaded matching page. It does not reload, navigate, focus, pin, or close the tab.
+- Sending a prompt reuses the discovered provider tab without navigating it to the provider home page. If no matching tab exists, only the requested provider tab is created in the background.
+- The explicit `Open tabs in Zen` action reuses discovered provider tabs and creates only missing provider tabs. It does not create duplicates for providers that are already open.
+- The extension must never call `browser.tabs.remove()` or `browser.windows.remove()`, and must not reorganize or unpin tabs in the user's normal Zen workspace.
+- If script injection is blocked, the app reports that specific provider tab and asks for a manual reload rather than silently opening another tab.
 - Regression coverage asserts that destructive tab/window removal APIs are absent and that session checks do not call the tab-creation path.

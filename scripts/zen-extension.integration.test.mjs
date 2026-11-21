@@ -43,7 +43,7 @@ function createExtensionHarness() {
   const statusWrites = []
   const browser = {
     runtime: {
-      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.0' }),
+      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.1' }),
       getURL: (path) => `moz-extension://test/${path}`,
       onMessage: {
         addListener: (listener) => { runtimeListener = listener },
@@ -90,13 +90,26 @@ function createExtensionHarness() {
   }
 }
 
-test('Zen extension never removes browser tabs and does not create tabs during session checks', () => {
+test('Zen extension discovers existing provider tabs without destructive browser changes', () => {
   const source = readFileSync(new URL('../zen-extension/background.js', import.meta.url), 'utf8')
   assert.equal(source.includes('browser.tabs.remove('), false)
   assert.equal(source.includes('browser.windows.remove('), false)
   const sessionCheck = source.split("if (action === 'checkSessions') {")[1]?.split("if (action === 'send') {")[0] || ''
-  assert.ok(sessionCheck.includes('getTabsState()'))
+  assert.ok(sessionCheck.includes('discoverProviderTabs()'))
   assert.equal(sessionCheck.includes('ensureTabs()'), false)
+  assert.ok(source.includes('browser.tabs.query({})'))
+})
+
+
+test('Zen extension can activate content scripts in already-open provider tabs', () => {
+  const source = readFileSync(new URL('../zen-extension/background.js', import.meta.url), 'utf8')
+  const waitForContent = source.split('async function waitForContent(')[1]?.split('async function ensureModelTab(')[0] || ''
+  const automation = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  assert.ok(waitForContent.includes("file: 'content/submission.js'"))
+  assert.ok(waitForContent.includes("file: 'content/automation.js'"))
+  assert.ok(waitForContent.includes("type: 'mai:ping'"))
+  assert.ok(automation.includes('window.__maiAutomationVersion === EXTENSION_VERSION'))
+  assert.ok(automation.includes('browser.runtime.onMessage.removeListener(window.__maiAutomationListener)'))
 })
 test('Zen extension pairs, authenticates and forwards progress over the bridge', async () => {
   MockWebSocket.instances = []
@@ -117,7 +130,7 @@ test('Zen extension pairs, authenticates and forwards progress over the bridge',
   assert.deepEqual(socket.sent[0], {
     type: 'auth',
     token: 'integration-secret',
-    extensionVersion: '0.3.0',
+    extensionVersion: '0.3.1',
   })
 
   socket.emit('message', { data: JSON.stringify({ type: 'auth-ok' }) })
