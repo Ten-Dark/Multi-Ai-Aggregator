@@ -1,10 +1,11 @@
 import { chromium } from 'playwright'
 import fs from 'node:fs'
 import path from 'node:path'
+import { probeProfileDir } from './probe-profile-path.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const outDir = path.join(root, 'probe')
-const context = await chromium.launchPersistentContext(path.join(root, '.probe-profile'), {
+const context = await chromium.launchPersistentContext(probeProfileDir, {
   channel: 'msedge',
   headless: false,
   viewport: { width: 1280, height: 900 }

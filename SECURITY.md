@@ -16,6 +16,10 @@ This binds the pairing to one installed Zen extension identity/profile. Reinstal
 
 Do not share the pairing code. It contains the local bridge authentication token.
 
+## Isolated browser probe profile
+
+The existing Edge probe profile was moved out of the repository without deleting its contents. Its default location is `%LOCALAPPDATA%\\Multi-AI Aggregator\\Forensics\\probe-profile`. The probe scripts resolve this location through `scripts/probe-profile-path.mjs`; set `AGGREGATOR_PROBE_PROFILE_DIR` to override it. The profile can contain cookies and authenticated sessions, so do not commit, upload, or share it.
+
 ## Renderer Content Security Policy
 
 The renderer HTML declares a restrictive Content Security Policy. The only additional WebSocket destination allowed for development is Vite's local HMR endpoint; the app's own bridge remains bound to loopback.

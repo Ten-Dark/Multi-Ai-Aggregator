@@ -1,9 +1,10 @@
 import { chromium } from 'playwright'
 import fs from 'node:fs'
 import path from 'node:path'
+import { probeProfileDir } from './probe-profile-path.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const profile = path.join(root, '.probe-profile')
+const profile = probeProfileDir
 const outDir = path.join(root, 'probe')
 fs.mkdirSync(outDir, { recursive: true })
 fs.mkdirSync(profile, { recursive: true })
