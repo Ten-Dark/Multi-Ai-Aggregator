@@ -582,52 +582,90 @@ async function waitForContent(tabId, timeoutMs = 45_000, signal) {
   const deadline = Date.now() + timeoutMs
   let injectionAttempted = false
   let injectionError = null
+  let lastPingError = null
   let lastTab = null
-
-  while (Date.now() < deadline) {
-    throwIfAborted(signal)
-    const tab = await browser.tabs.get(tabId).catch(() => null)
-    if (!tab) throw makeError('browser', 'Вкладка Zen была закрыта.')
-    lastTab = tab
-
-    if (tab.status === 'complete' && !injectionAttempted) {
-      try {
-        const ping = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
-        if (ping?.ok) return
-      } catch {
-        // Existing tabs may predate extension installation or update.
-      }
-
-      injectionAttempted = true
-      try {
-        await browser.tabs.executeScript(tabId, { file: 'content/submission.js' })
-        await browser.tabs.executeScript(tabId, { file: 'content/automation.js' })
-      } catch (error) {
-        injectionError = error
-      }
+  let lastUrl = null
+  let navigationVersion = 0
+  let observedNavigationVersion = 0
+  const onTabUpdated = (updatedTabId, changeInfo) => {
+    if (updatedTabId === tabId && (changeInfo.status === 'loading' || typeof changeInfo.url === 'string')) {
+      navigationVersion += 1
     }
-
-    try {
-      const response = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
-      if (response?.ok) return
-    } catch {
-      // Content script may still be initializing.
-    }
-
-    if (injectionError) {
-      throw makeError(
-        'site',
-        `Не удалось активировать расширение на вкладке ${tab.url}. Проверьте разрешения Zen и перезагрузите эту вкладку вручную.`,
-        injectionError instanceof Error ? injectionError.message : undefined,
-      )
-    }
-    await delay(300, signal)
   }
 
-  throw makeError(
-    'site',
-    `Вкладка ${lastTab?.url || 'провайдера'} найдена, но скрипт автоматизации не отвечает. Перезагрузите эту вкладку вручную.`,
-  )
+  browser.tabs.onUpdated?.addListener(onTabUpdated)
+  try {
+    while (Date.now() < deadline) {
+      throwIfAborted(signal)
+      const tab = await browser.tabs.get(tabId).catch(() => null)
+      if (!tab) throw makeError('browser', 'Вкладка Zen была закрыта.')
+      lastTab = tab
+
+      const navigationChanged = navigationVersion !== observedNavigationVersion
+        || (lastUrl !== null && tab.url !== lastUrl)
+      if (navigationChanged || tab.status === 'loading') {
+        injectionAttempted = false
+        injectionError = null
+        lastPingError = null
+        observedNavigationVersion = navigationVersion
+      }
+      lastUrl = tab.url || lastUrl
+
+      if (tab.status !== 'complete') {
+        await delay(300, signal)
+        continue
+      }
+
+      if (!injectionAttempted) {
+        try {
+          const ping = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
+          if (ping?.ok) return
+          lastPingError = new Error('Content Script ответил без подтверждения mai:ping.')
+        } catch (error) {
+          lastPingError = error
+        }
+
+        injectionAttempted = true
+        try {
+          await browser.tabs.executeScript(tabId, { file: 'content/submission.js' })
+          await browser.tabs.executeScript(tabId, { file: 'content/automation.js' })
+        } catch (error) {
+          injectionError = error
+        }
+      }
+
+      try {
+        const response = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
+        if (response?.ok) return
+        lastPingError = new Error('Content Script не подтвердил готовность после внедрения.')
+      } catch (error) {
+        lastPingError = error
+      }
+
+      if (injectionError) {
+        throw makeError(
+          'site',
+          `Не удалось активировать расширение на вкладке ${tab.url}. Проверьте разрешения Zen и перезагрузите эту вкладку вручную.`,
+          injectionError instanceof Error ? injectionError.message : String(injectionError),
+        )
+      }
+      await delay(300, signal)
+    }
+
+    const detail = injectionError instanceof Error
+      ? injectionError.message
+      : lastPingError instanceof Error
+        ? lastPingError.message
+        : 'ответ от Content Script не получен'
+    throw makeError(
+      'site',
+      `Вкладка ${lastTab?.url || 'провайдера'} найдена, но скрипт автоматизации не отвечает. Последняя ошибка: ${detail}`,
+      detail,
+    )
+  } finally {
+    browser.tabs.onUpdated?.removeListener(onTabUpdated)
+  }
+
 }
 async function ensureModelTab(model, options = {}) {
   throwIfAborted(options.signal)
@@ -701,8 +739,8 @@ async function inspectModelSession(model, tabId) {
 
   throw makeError(
     'site',
-    `${ADAPTERS[model].label}: страница перезагружалась во время проверки. Откройте вкладку и проверьте её состояние.`,
-    lastError instanceof Error ? lastError.message : undefined,
+    `${ADAPTERS[model].label}: проверка не завершилась. ${lastError instanceof Error ? `Причина: ${lastError.message}` : `Последняя ошибка: ${String(lastError ?? 'неизвестно')}`}.`,
+    lastError instanceof Error ? lastError.message : String(lastError ?? ''),
   )
 }
 

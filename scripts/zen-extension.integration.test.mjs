@@ -43,7 +43,7 @@ function createExtensionHarness() {
   const statusWrites = []
   const browser = {
     runtime: {
-      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.1' }),
+      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.2' }),
       getURL: (path) => `moz-extension://test/${path}`,
       onMessage: {
         addListener: (listener) => { runtimeListener = listener },
@@ -75,7 +75,6 @@ function createExtensionHarness() {
     setTimeout,
     clearTimeout,
     fetch: async () => ({ ok: false }),
-    Date,
     Promise,
     Map,
     String,
@@ -108,6 +107,10 @@ test('Zen extension can activate content scripts in already-open provider tabs',
   assert.ok(waitForContent.includes("file: 'content/submission.js'"))
   assert.ok(waitForContent.includes("file: 'content/automation.js'"))
   assert.ok(waitForContent.includes("type: 'mai:ping'"))
+  assert.ok(waitForContent.includes('browser.tabs.onUpdated?.addListener(onTabUpdated)'))
+  assert.ok(waitForContent.includes("tab.status === 'loading'"))
+  assert.ok(waitForContent.includes('injectionAttempted = false'))
+  assert.ok(waitForContent.includes('browser.tabs.onUpdated?.removeListener(onTabUpdated)'))
   assert.ok(automation.includes('window.__maiAutomationVersion === EXTENSION_VERSION'))
   assert.ok(automation.includes('browser.runtime.onMessage.removeListener(window.__maiAutomationListener)'))
 })
@@ -130,7 +133,7 @@ test('Zen extension pairs, authenticates and forwards progress over the bridge',
   assert.deepEqual(socket.sent[0], {
     type: 'auth',
     token: 'integration-secret',
-    extensionVersion: '0.3.1',
+    extensionVersion: '0.3.2',
   })
 
   socket.emit('message', { data: JSON.stringify({ type: 'auth-ok' }) })

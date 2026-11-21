@@ -36,8 +36,9 @@ try {
 
   const script = String.raw`
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 Compress-Archive -Path (Join-Path $env:MAI_EXTENSION_SOURCE '*') -DestinationPath $env:MAI_EXTENSION_ZIP -Force
-Expand-Archive -LiteralPath $env:MAI_EXTENSION_ZIP -DestinationPath $env:MAI_EXTENSION_VERIFY -Force
+[System.IO.Compression.ZipFile]::ExtractToDirectory($env:MAI_EXTENSION_ZIP, $env:MAI_EXTENSION_VERIFY)
 `
   execFileSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
