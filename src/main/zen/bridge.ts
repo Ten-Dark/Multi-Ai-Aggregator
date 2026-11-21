@@ -154,6 +154,7 @@ export class ZenBridge {
   private setInfo(info: BrowserInfo): void {
     this.info = info
     this.emit({ type: 'browser', browser: this.getBrowserInfo() })
+    this.emit({ type: 'zen-connection', connection: this.getZenConnection() })
   }
 
   getBrowserInfo(): BrowserInfo {

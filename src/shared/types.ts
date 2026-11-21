@@ -88,6 +88,7 @@ export type AggregatorEvent =
   | { type: 'browser'; browser: BrowserInfo }
   | { type: 'session'; session: SessionInfo }
   | { type: 'model'; result: ModelResult }
+  | { type: 'zen-connection'; connection: ZenConnectionInfo }
 
 export interface AggregatorApi {
   getBrowserInfo: () => Promise<BrowserInfo>

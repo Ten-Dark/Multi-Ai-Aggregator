@@ -10,7 +10,7 @@
     "build": "npm run clean && tsc -p tsconfig.json && vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:security": "npm run build && node --test scripts/security-origin.test.mjs",
+    "test:security": "npm run build && node --test scripts/*.test.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
   },

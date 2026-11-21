@@ -1,5 +1,55 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+const MODEL_IDS = new Set(['chatgpt', 'qwen', 'deepseek'])
+const SESSION_STATUSES = new Set([
+  'unknown', 'checking', 'logged-in', 'guest', 'login-required',
+  'manual-action', 'blocked', 'error',
+])
+const TASK_STATUSES = new Set(['idle', 'queued', 'opening', 'sending', 'waiting', 'done', 'error'])
+const ERROR_CODES = new Set(['login', 'manual', 'blocked', 'timeout', 'busy', 'browser', 'site', 'unknown'])
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isAggregatorEvent(value) {
+  if (!isRecord(value) || typeof value.type !== 'string') return false
+
+  if (value.type === 'browser') {
+    const browser = value.browser
+    return isRecord(browser) &&
+      ['stopped', 'starting', 'running', 'error'].includes(browser.status) &&
+      (browser.browserName === undefined || typeof browser.browserName === 'string') &&
+      (browser.message === undefined || typeof browser.message === 'string')
+  }
+
+  if (value.type === 'session') {
+    const session = value.session
+    return isRecord(session) && MODEL_IDS.has(session.model) &&
+      SESSION_STATUSES.has(session.status) && typeof session.message === 'string' &&
+      (session.url === undefined || typeof session.url === 'string')
+  }
+
+  if (value.type === 'model') {
+    const result = value.result
+    return isRecord(result) && MODEL_IDS.has(result.model) &&
+      TASK_STATUSES.has(result.status) && Number.isFinite(result.updatedAt) &&
+      (result.text === undefined || typeof result.text === 'string') &&
+      (result.error === undefined || typeof result.error === 'string') &&
+      (result.errorCode === undefined || ERROR_CODES.has(result.errorCode)) &&
+      (result.partial === undefined || typeof result.partial === 'boolean')
+  }
+
+  if (value.type === 'zen-connection') {
+    const connection = value.connection
+    return isRecord(connection) && typeof connection.pairingCode === 'string' &&
+      typeof connection.wsUrl === 'string' && typeof connection.connected === 'boolean' &&
+      (connection.extensionVersion === undefined || typeof connection.extensionVersion === 'string')
+  }
+
+  return false
+}
+
 contextBridge.exposeInMainWorld('aggregator', {
   getBrowserInfo: () => ipcRenderer.invoke('aggregator:getBrowserInfo'),
   launchBrowser: () => ipcRenderer.invoke('aggregator:launchBrowser'),
@@ -13,7 +63,10 @@ contextBridge.exposeInMainWorld('aggregator', {
   getZenConnection: () => ipcRenderer.invoke('aggregator:getZenConnection'),
   onEvent: (callback) => {
     if (typeof callback !== 'function') return () => {}
-    const handler = (_event, payload) => callback(payload)
+    const handler = (_event, payload) => {
+      if (!isAggregatorEvent(payload)) return
+      callback(payload)
+    }
     ipcRenderer.on('aggregator:event', handler)
     return () => ipcRenderer.removeListener('aggregator:event', handler)
   },

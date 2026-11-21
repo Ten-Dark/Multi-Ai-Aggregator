@@ -100,13 +100,7 @@ export function App() {
   )
   const busy = sending || synthesizing || taskInProgress || checkingSessions || !zenConnected
 
-  const refreshZenConnection = useCallback(async () => {
-    try {
-      setZenConnection(await window.aggregator.getZenConnection())
-    } catch {
-      // The bridge may not have started yet.
-    }
-  }, [])
+
 
   const applyModelResult = useCallback((result: ModelResult) => {
     setResults((current) => ({ ...current, [result.model]: result }))
@@ -168,10 +162,8 @@ export function App() {
 
   useEffect(() => {
     const unsubscribe = window.aggregator.onEvent((event) => {
-      if (event.type === 'browser') {
-        setBrowser(event.browser)
-        void refreshZenConnection()
-      }
+      if (event.type === 'browser') setBrowser(event.browser)
+      if (event.type === 'zen-connection') setZenConnection(event.connection)
       if (event.type === 'session') {
         setSessions((current) => ({ ...current, [event.session.model]: event.session }))
       }
@@ -184,21 +176,14 @@ export function App() {
       .getBrowserInfo()
       .then(setBrowser)
       .catch(() => {})
-    void refreshZenConnection()
+    void window.aggregator.getZenConnection().then(setZenConnection).catch(() => {})
     void refreshSessions()
 
     return () => {
       unsubscribe()
       if (copyTimer.current) clearTimeout(copyTimer.current)
     }
-  }, [applyModelResult, refreshSessions, refreshZenConnection])
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      void refreshZenConnection()
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [refreshZenConnection])
+  }, [applyModelResult, refreshSessions])
 
   const openBrowser = async () => {
     setGlobalError('')
