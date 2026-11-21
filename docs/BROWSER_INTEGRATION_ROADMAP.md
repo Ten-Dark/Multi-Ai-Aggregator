@@ -1,9 +1,9 @@
 # Browser Integration and Self-Healing Roadmap
 
-**Status:** Stage 0 architecture baseline documented; implementation not yet started.
+**Status:** Stage 0 complete; Stage 1 discovery MVP implemented and awaiting broader validation.
 **Architecture:** [Browser Integration Architecture](./BROWSER_INTEGRATION_ARCHITECTURE.md)
 **Decision:** [ADR 0001 — User-Browser-First Integration](./adr/0001-user-browser-first-integration.md)
-**Current baseline commit:** 78c216a
+**Architecture baseline commit:** 0363ad3
 **Current connector:** Zen WebExtension + loopback WebSocket bridge.
 
 ## Delivery rules
@@ -37,15 +37,15 @@
 
 **Goal:** Reliably discover running browser instances and profile candidates without touching browser data.
 
-- [ ] S1.1 Define shared types: BrowserFamily, BrowserProcessDescriptor, BrowserProfileCandidate, BrowserInstance, DiscoveryConfidence.
+- [x] S1.1 Define shared BrowserFamily, BrowserProcessDescriptor, and DiscoveryConfidence types. Profile/instance aggregation remains a follow-up.
 - [ ] S1.2 Define BrowserDiscoveryProvider interface and OS provider registry.
-- [ ] S1.3 Implement Windows process enumeration behind a provider; do not put Windows APIs in Core.
+- [x] S1.3 Implement read-only Windows process enumeration in an isolated discovery service; no profile database access.
 - [ ] S1.4 Parse process executable, command line, parent/child relationships, start time, and visible-window metadata.
-- [ ] S1.5 Parse Firefox-family -profile / -P and Chromium-family --user-data-dir / --profile-directory arguments.
+- [x] S1.5 Parse Firefox-family -profile and Chromium --user-data-dir / --profile-directory arguments.
 - [ ] S1.6 Add browser family/product identification from executable metadata and process metadata; support unknown/custom browser products.
-- [ ] S1.7 Add deterministic fixtures for quoted executable paths, spaces, Unicode paths, missing profile flags, multiple profiles, child processes, and portable installs.
-- [ ] S1.8 Represent ambiguous candidates without selecting an arbitrary first process.
-- [ ] S1.9 Add a read-only diagnostic for the user's currently running X:\BrowserPortal\ZenProfile instance when present; never assume that path in production code.
+- [x] S1.7 Add deterministic fixtures for quoted paths, spaces, Unicode, missing flags, custom executables, and child processes.
+- [x] S1.8 Preserve multiple root process candidates and collapse child processes; no arbitrary first-process selection.
+- [x] S1.9 Add a read-only diagnostic for the user's currently running X:\BrowserPortal\ZenProfile instance when present; never assume that path in production code.
 - [ ] S1.10 Add macOS/Linux provider interfaces and document implementation requirements; do not claim those OSes supported until implemented and tested.
 
 **Exit criteria:** Discovery is path-independent on Windows, identifies multiple instances/profile candidates, exposes confidence/provenance, and does not inspect or modify profile databases.
@@ -153,6 +153,12 @@
 - Main-owned task lifecycle and cancellation semantics remain intact.
 - npm run typecheck, npm run test:security, build/package checks, and git diff --check pass for relevant changes.
 - Real-browser evidence is reported separately from mocks.
+
+## Stage 1 implementation status
+
+The first Windows discovery slice is implemented in `src/main/browser/browser-discovery.ts` and exposed through a narrow IPC/preload API. The renderer displays discovered root browser processes, executable paths, profile candidates, and confidence. The process scan is read-only and does not inspect cookies, profile databases, extension storage, or provider pages.
+
+Live Windows smoke validation identified the active Zen process and its `X:\\BrowserPortal\\ZenProfile` profile. Browser process detection remains distinct from extension connection, tab discovery, and provider authentication. Generic unknown executable candidates are intentionally conservative to avoid classifying Electron apps such as Discord or Docker as browsers.
 
 ## First implementation slice after Stage 0
 

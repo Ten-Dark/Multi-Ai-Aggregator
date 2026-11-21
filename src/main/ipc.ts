@@ -2,6 +2,7 @@ import { app, clipboard, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { MODEL_IDS, type ModelId, type SynthesisRequest } from '../shared/types.js'
 import { getMainWindow } from './window.js'
 import type { ZenBridge } from './zen/bridge.js'
+import type { BrowserDiscoveryService } from './browser/browser-discovery.js'
 import { isTaskId } from './zen/protocol.js'
 import { isTrustedIpcSender } from './ipc-security.js'
 
@@ -100,7 +101,15 @@ function validateSynthesisRequest(value: unknown): SynthesisRequest {
   return { model: request.model, prompt: request.prompt, answers }
 }
 
-export function registerAggregatorIpc(getBridge: () => ZenBridge): void {
+export function registerAggregatorIpc(
+  getBridge: () => ZenBridge,
+  browserDiscovery: BrowserDiscoveryService,
+): void {
+  ipcMain.handle('aggregator:getBrowserDiscovery', async (event) => {
+    assertTrustedSender(event)
+    return browserDiscovery.discover()
+  })
+
   ipcMain.handle('aggregator:getBrowserInfo', async (event) => {
     assertTrustedSender(event)
     return getBridge().getBrowserInfo()

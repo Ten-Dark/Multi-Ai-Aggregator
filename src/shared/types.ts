@@ -69,6 +69,32 @@ export interface BrowserInfo {
   message?: string
 }
 
+export type BrowserFamily = 'firefox' | 'chromium' | 'unknown'
+export type DiscoveryConfidence = 'high' | 'medium' | 'low'
+
+export interface BrowserProcessDescriptor {
+  id: string
+  processId: number
+  parentProcessId: number
+  executableName: string
+  executablePath?: string
+  family: BrowserFamily
+  product: string
+  startedAt?: string
+  profilePath?: string
+  profileName?: string
+  profileSource: 'firefox-profile-argument' | 'chromium-user-data-dir' | 'generic-profile-argument' | 'default-or-unknown'
+  confidence: DiscoveryConfidence
+}
+
+export interface BrowserDiscoverySnapshot {
+  platform: string
+  scannedAt: number
+  status: 'available' | 'unsupported' | 'error'
+  processes: BrowserProcessDescriptor[]
+  message: string
+}
+
 export interface SynthesisAnswer {
   model: ModelId
   text?: string
@@ -101,6 +127,7 @@ export type AggregatorEvent =
 
 export interface AggregatorApi {
   getBrowserInfo: () => Promise<BrowserInfo>
+  getBrowserDiscovery: () => Promise<BrowserDiscoverySnapshot>
   launchBrowser: () => Promise<BrowserInfo>
   checkSessions: () => Promise<SessionInfo[]>
   focusModel: (model: ModelId) => Promise<void>

@@ -59,6 +59,7 @@ function isAggregatorEvent(value) {
 
 contextBridge.exposeInMainWorld('aggregator', {
   getBrowserInfo: () => ipcRenderer.invoke('aggregator:getBrowserInfo'),
+  getBrowserDiscovery: () => ipcRenderer.invoke('aggregator:getBrowserDiscovery'),
   launchBrowser: () => ipcRenderer.invoke('aggregator:launchBrowser'),
   checkSessions: () => ipcRenderer.invoke('aggregator:checkSessions'),
   focusModel: (model) => ipcRenderer.invoke('aggregator:focusModel', model),

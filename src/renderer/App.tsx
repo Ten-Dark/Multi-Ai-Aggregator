@@ -2,6 +2,7 @@ import { MODEL_IDS, MODEL_LABELS, type ModelId } from '../shared/types'
 import { ModelResponseCard } from './components/ModelResponseCard'
 import { QueryPanel } from './components/QueryPanel'
 import { ConnectionPanel } from './components/ConnectionPanel'
+import { BrowserDiscoveryPanel } from './components/BrowserDiscoveryPanel'
 import { SynthesisPanel } from './components/SynthesisPanel'
 import { useAggregatorController } from './use-aggregator-controller'
 
@@ -39,6 +40,8 @@ export function App() {
           </button>
         </div>
       </header>
+
+      <BrowserDiscoveryPanel />
 
       <section className="session-strip" aria-label="Состояние сессий">
         {MODEL_IDS.map((model) => {

@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu } from 'electron'
 import { createWindow, getMainWindow } from './window.js'
 import { ZenBridge } from './zen/bridge.js'
 import { registerAggregatorIpc } from './ipc.js'
+import { BrowserDiscoveryService } from './browser/browser-discovery.js'
 import type { AggregatorEvent } from '../shared/types.js'
 
 app.setName('Multi-AI Aggregator')
@@ -12,6 +13,7 @@ if (!gotSingleInstanceLock) {
   app.quit()
 } else {
   let aggregator: ZenBridge | null = null
+  const browserDiscovery = new BrowserDiscoveryService()
   let quitting = false
 
   const emit = (event: AggregatorEvent): void => {
@@ -40,10 +42,13 @@ if (!gotSingleInstanceLock) {
         console.error('[aggregator] Zen bridge startup failed:', error)
       }
 
-      registerAggregatorIpc(() => {
-        if (!aggregator) throw new Error('Приложение ещё не готово.')
-        return aggregator
-      })
+      registerAggregatorIpc(
+        () => {
+          if (!aggregator) throw new Error('Приложение ещё не готово.')
+          return aggregator
+        },
+        browserDiscovery,
+      )
 
       const window = createWindow()
 
