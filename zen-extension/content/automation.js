@@ -669,35 +669,39 @@
     await delay(400, signal)
     throwIfAborted(signal)
     const afterFill = readAnswerState()
-    if (!afterFill.composerText.trim()) {
-      throw new MaiError('site', `${adapter.label}: не удалось заполнить поле ввода.`)
+    if (!globalThis.MaiSubmission.matchesPrompt(afterFill.composerText, prompt)) {
+      throw new MaiError('site', `${adapter.label}: содержимое поля ввода не совпадает с исходным запросом. Отправка отменена.`)
     }
 
     sendProgress('sending', purpose, taskId)
     const button = await waitForSendButton(composer, 5000, signal)
     throwIfAborted(signal)
-    if (button) {
-      clickElement(button)
-    } else if (composer.form) {
-      composer.form.requestSubmit()
-    } else {
+    if (!button && !composer.form) {
       throw new MaiError('site', `${adapter.label}: не найдена кнопка отправки.`)
     }
 
     const evidenceState = { ...afterFill, assistantCount: before.assistantCount, url: before.url }
-    let sent = await waitForSendEvidence(evidenceState, 5000, signal)
-
-    if (!sent) {
-      throwIfAborted(signal)
-      const form = composer.form
-      if (form) form.requestSubmit()
-      sent = await waitForSendEvidence(evidenceState, 5000, signal)
+    let submissionState
+    try {
+      submissionState = await globalThis.MaiSubmission.submitOnce(
+        () => {
+          if (button) clickElement(button)
+          else composer.form.requestSubmit()
+        },
+        () => waitForSendEvidence(evidenceState, 10_000, signal),
+      )
+    } catch (error) {
+      if (error?.code === 'cancelled') throw error
+      throw new MaiError(
+        'submission-unknown',
+        `${adapter.label}: действие отправки было начато, но подтвердить его не удалось. Повторная отправка автоматически отключена во избежание дубликата. Проверьте вкладку сервиса перед повторной попыткой.`,
+      )
     }
 
-    if (!sent) {
+    if (submissionState === 'submission-unknown') {
       throw new MaiError(
-        'site',
-        `${adapter.label}: не удалось отправить запрос. Возможно, изменился интерфейс сервиса или требуется действие в браузере.`,
+        'submission-unknown',
+        `${adapter.label}: запрос мог быть принят, но интерфейс не подтвердил отправку. Автоматическая повторная отправка отключена. Проверьте вкладку сервиса перед повторной попыткой.`,
       )
     }
 

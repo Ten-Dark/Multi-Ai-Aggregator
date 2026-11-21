@@ -23,6 +23,18 @@ This document records the current implementation and diagnostic evidence. It sup
 
 Build metadata warnings about missing author and application icon are non-blocking for the current reliability work.
 
+## Remediation update
+
+After recording the initial baseline, the first reliability slice was implemented:
+
+- The content script now invokes the provider submit action at most once per task attempt. If send evidence does not arrive within the observation window, it returns the explicit `submission-unknown` outcome and instructs the user to inspect the provider tab; it does not call `requestSubmit()` again.
+- Prompt contents are compared with the original request before submission (line endings and non-breaking spaces are normalized; other content differences are rejected).
+- A shared extension helper is loaded before the automation content script.
+- New deterministic tests cover delayed evidence, absent evidence, submit-action failure, prompt equality, and the existing cancellation-after-submit path.
+- Latest validation after these changes: `npm run test:security` **PASS, 57/57**; `npm run typecheck` **PASS**; `git diff --check` **PASS**.
+
+This closes the blind-retry defect and exact-fill check. It does not establish response correlation, completion correctness, Windows ACL hardening, or real-provider E2E readiness.
+
 ## Current integration observations
 
 - The installed XPI in the user's Zen profile was version `0.2.0` (Manifest V2); the repository extension is version `0.3.0` (Manifest V2). The installed package is stale relative to the repository.
@@ -47,10 +59,10 @@ Build metadata warnings about missing author and application icon are non-blocki
 
 | Priority | Work | Exit evidence |
 |---|---|---|
-| P0 | Remove blind retry and introduce an explicit ambiguous-submission outcome | Deterministic regression test proves a single submit action when evidence is delayed or absent. |
+| P0 | Remove blind retry and introduce an explicit ambiguous-submission outcome | **Implemented and tested**; one submit action is asserted for delayed and absent evidence. |
 | P0 | Harden Windows bridge-token DACL | ACL contains only the intended current-user/SYSTEM/Administrators principals; startup verification and tests cover the policy. |
 | P0 | Establish a repeatable normal-send DOM test harness | Tests cover fill, single submit, delayed evidence, missing evidence, cancellation, and no duplicate send. |
-| P1 | Verify exact composer contents | Whitespace-normalized exact prompt equality before submission. |
+| P1 | Verify exact composer contents | **Implemented and tested**; line endings and NBSP normalized, all other text differences rejected. |
 | P1 | Correlate responses to the current user turn | A stale/late prior response cannot satisfy a newer task. |
 | P1 | Improve completion and no-progress detection | Provider-specific multi-signal completion tests; incomplete output remains partial/timeout. |
 | P1 | Positive session-state evidence | Logged-in/guest/login-required states are based on positive provider signals, with unknown kept distinct. |

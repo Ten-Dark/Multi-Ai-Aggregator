@@ -265,7 +265,9 @@ function createContentHarness() {
     querySelectorAll: () => [],
   }
   const window = { __maiAutomationLoaded: false }
-  const source = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const submissionSource = readFileSync(new URL('../zen-extension/content/submission.js', import.meta.url), 'utf8')
+  const automationSource = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const source = `${submissionSource}\n;\n${automationSource}`
   runInNewContext(source, {
     browser,
     window,
@@ -349,7 +351,9 @@ function createSubmittedContentHarness() {
       onMessage: { addListener: (callback) => { listener = callback } },
     },
   }
-  const source = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const submissionSource = readFileSync(new URL('../zen-extension/content/submission.js', import.meta.url), 'utf8')
+  const automationSource = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const source = `${submissionSource}\n;\n${automationSource}`
   runInNewContext(source, {
     browser,
     window: { __maiAutomationLoaded: false },

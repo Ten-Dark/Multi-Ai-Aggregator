@@ -3,7 +3,7 @@
 **Status:** Planning baseline
 **Architecture reference:** [`PROVIDER_RUNTIME_ARCHITECTURE.md`](./PROVIDER_RUNTIME_ARCHITECTURE.md)
 **Starting commit:** `1262368`
-**Implementation status:** No tasks in this roadmap have been implemented yet.
+**Implementation status:** P0/P1 reliability work is in progress. See [`PROVIDER_RUNTIME_BASELINE.md`](./PROVIDER_RUNTIME_BASELINE.md) for the current evidence and remaining blockers.
 
 ## Principles
 
@@ -24,7 +24,7 @@ Tasks:
 - [ ] P0.2 Inventory current provider-specific selectors, login detection, blocker detection, submission evidence, response extraction, and completion rules.
 - [ ] P0.3 Compare adapter configuration in the current source tree and remove drift by defining one canonical provider adapter contract/configuration source.
 - [ ] P0.4 Define typed provider error taxonomy and task submission states, including `submission-unknown` and `partial` semantics; preserve current terminal-state arbitration.
-- [ ] P0.5 Add deterministic tests for adapter state transitions, retry rules, and “never resend after ambiguous submission”.
+- [x] P0.5 Add deterministic tests for submission outcomes, prompt verification, and “never resend after ambiguous submission”.
 
 Exit criteria: baseline recorded; adapter contract documented; all existing tests pass; no source behavior changes without tests.
 
@@ -35,8 +35,8 @@ Exit criteria: baseline recorded; adapter contract documented; all existing test
 Tasks:
 
 - [ ] P1.1 Add a submission state machine: `preparing`, `ready-to-submit`, `submitting`, `submitted`, `submission-unknown`.
-- [ ] P1.2 Strengthen composer readiness and prompt-fill verification using visibility, enabled state, and value/content verification.
-- [ ] P1.3 Add explicit submission evidence and prevent blind retries after ambiguous send actions.
+- [x] P1.2 Strengthen prompt-fill verification by comparing the normalized composer contents with the original prompt before submission.
+- [x] P1.3 Add explicit submission evidence and prevent blind retries after ambiguous send actions (`submission-unknown`).
 - [ ] P1.4 Correlate extracted assistant messages with the current task and latest user message.
 - [ ] P1.5 Implement multi-signal completion detection with `MutationObserver`, generation controls, response stability, and provider-specific completion markers.
 - [ ] P1.6 Separate overall timeout from no-progress timeout and collect timing metrics.

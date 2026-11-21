@@ -39,7 +39,7 @@
         "https://chat.qwen.ai/*",
         "https://chat.deepseek.com/*"
       ],
-      "js": ["content/automation.js"],
+      "js": ["content/submission.js", "content/automation.js"],
       "run_at": "document_idle"
     }
   ]
