@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import type { BrowserDiscoverySnapshot, BrowserFamily, BrowserProcessDescriptor } from '../../shared/types.js'
-import { LinuxBrowserDiscoveryProvider, MacOSBrowserDiscoveryProvider } from './unix-browser-discovery.js'
 
 const execFileAsync = promisify(execFile)
 const PROCESS_TIMEOUT_MS = 12_000
@@ -179,15 +179,19 @@ export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDesc
     const genericProfile = classification.family === 'unknown' ? readFlagValue(args, ['-profile', '--profile', '--user-data-dir']) : undefined
     const profilePath = firefoxProfile || chromiumUserData || genericProfile
     const profileName = chromiumProfile || undefined
+    const executablePath = typeof row.ExecutablePath === 'string' ? row.ExecutablePath : undefined
+    const instanceIdentity = [classification.family, classification.product, (executablePath || row.Name).toLowerCase(), (profilePath || 'default').toLowerCase()].join('\\0')
+    const instanceId = 'browser-instance:' + createHash('sha256').update(instanceIdentity).digest('hex').slice(0, 20)
     const profileSource: BrowserProcessDescriptor['profileSource'] = firefoxProfile
       ? 'firefox-profile-argument'
       : chromiumUserData ? 'chromium-user-data-dir' : genericProfile ? 'generic-profile-argument' : 'default-or-unknown'
     descriptors.push({
       id: 'windows-process:' + row.ProcessId,
+      instanceId,
       processId: row.ProcessId,
       parentProcessId: row.ParentProcessId,
       executableName: row.Name,
-      executablePath: typeof row.ExecutablePath === 'string' ? row.ExecutablePath : undefined,
+      executablePath,
       family: classification.family,
       product: classification.product,
       startedAt: typeof row.CreationDate === 'string' ? row.CreationDate : undefined,
@@ -243,11 +247,7 @@ export class WindowsBrowserDiscoveryProvider implements BrowserDiscoveryProvider
 export class BrowserDiscoveryService {
   private readonly registry: BrowserDiscoveryRegistry
 
-  constructor(providers: readonly BrowserDiscoveryProvider[] = [
-    new WindowsBrowserDiscoveryProvider(),
-    new MacOSBrowserDiscoveryProvider(),
-    new LinuxBrowserDiscoveryProvider(),
-  ]) {
+  constructor(providers: readonly BrowserDiscoveryProvider[] = [new WindowsBrowserDiscoveryProvider()]) {
     this.registry = new BrowserDiscoveryRegistry(providers)
   }
 

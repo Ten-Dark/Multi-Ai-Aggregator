@@ -37,7 +37,7 @@
 
 **Goal:** Reliably discover running browser instances and profile candidates without touching browser data.
 
-- [x] S1.1 Define shared BrowserFamily, BrowserProcessDescriptor, and DiscoveryConfidence types. Profile/instance aggregation remains a follow-up.
+- [x] S1.1 Define shared BrowserFamily, BrowserProcessDescriptor, and DiscoveryConfidence types; attach a stable instance identifier derived from browser identity and explicit profile arguments.
 - [x] S1.2 Define BrowserDiscoveryProvider interface and OS provider registry.
 - [x] S1.3 Implement read-only Windows process enumeration in an isolated discovery service; no profile database access.
 - [x] S1.4 Parse process executable, command line, parent/child relationships, start time, and visible-window metadata.
@@ -46,7 +46,7 @@
 - [x] S1.7 Add deterministic fixtures for quoted paths, spaces, Unicode, missing flags, custom executables, and child processes.
 - [x] S1.8 Preserve multiple root process candidates and collapse child processes; no arbitrary first-process selection.
 - [x] S1.9 Add a read-only diagnostic for the user's currently running X:\BrowserPortal\ZenProfile instance when present; never assume that path in production code.
-- [ ] S1.10 Implement macOS/Linux process providers and complete platform-specific runtime validation. Initial providers and parser fixtures exist; native macOS/Linux execution remains unverified.
+- [ ] S1.10 POST-PRODUCTION: Activate, validate, and ship macOS/Linux process providers. Unix provider code is retained but intentionally excluded from the current Windows production runtime.
 
 **Exit criteria:** Discovery is path-independent on Windows, identifies multiple instances/profile candidates, exposes confidence/provenance, and does not inspect or modify profile databases.
 
@@ -160,7 +160,7 @@ The Windows discovery implementation is in `src/main/browser/browser-discovery.t
 
 Live Windows smoke validation identified the active Zen process, its `X:\\BrowserPortal\\ZenProfile` profile, and a visible Zen window title. The process scan is path-independent. Browser process detection remains distinct from extension connection, tab discovery, and provider authentication. Generic unknown executable candidates are intentionally conservative to avoid classifying unrelated Electron apps as browsers.
 
-macOS and Linux process providers are implemented in `src/main/browser/unix-browser-discovery.ts` and selected by the shared registry. Cross-platform parser fixtures pass on Windows, but native `ps` output and live profile detection have not yet been validated on macOS or Linux; these platforms are not yet declared production-supported.
+macOS/Linux provider code is retained in `src/main/browser/unix-browser-discovery.ts` for the post-production phase. The current production runtime intentionally registers only the Windows provider. Native macOS/Linux validation and activation are explicitly deferred until after the Windows production release.
 
 ## Next implementation slice
 

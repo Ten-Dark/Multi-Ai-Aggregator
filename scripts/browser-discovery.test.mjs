@@ -110,6 +110,24 @@ test('keeps separate browser profile roots as independent candidates', () => {
   assert.deepEqual(result.map((item) => item.profilePath), ['X:\\Profile One', 'Y:\\Profile Two'])
 })
 
+test('assigns stable distinct instance identifiers to separate browser profiles', () => {
+  const makeProcess = (processId, profilePath) => parseWindowsBrowserProcesses({
+    ProcessId: processId,
+    ParentProcessId: 1,
+    Name: 'zen.exe',
+    ExecutablePath: 'X:\\BrowserPortal\\App\\zen.exe',
+    CommandLine: 'zen.exe -profile "' + profilePath + '"',
+  })[0]
+
+  const first = makeProcess(21, 'X:\\Profile One')
+  const second = makeProcess(31, 'Y:\\Profile Two')
+  const relaunched = makeProcess(99, 'X:\\Profile One')
+
+  assert.ok(first.instanceId)
+  assert.notEqual(first.instanceId, second.instanceId)
+  assert.equal(first.instanceId, relaunched.instanceId)
+})
+
 test('includes visible window metadata when supplied by the OS provider', () => {
   const result = parseWindowsBrowserProcesses({
     ProcessId: 40,

@@ -74,6 +74,7 @@ export type DiscoveryConfidence = 'high' | 'medium' | 'low'
 
 export interface BrowserProcessDescriptor {
   id: string
+  instanceId?: string
   processId: number
   parentProcessId: number
   executableName: string
