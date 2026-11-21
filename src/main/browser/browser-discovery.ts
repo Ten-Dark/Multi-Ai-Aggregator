@@ -10,9 +10,34 @@ const POWERSHELL_DISCOVERY_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "$known = '^(zen|firefox|librewolf|floorp|waterfox|chrome|msedge|brave|vivaldi|opera|chromium|thorium|arc|sidekick)\\.exe$'",
   "$profileArgs = '(?i)(-profile\\s|--profile\\s|--user-data-dir(?:=|\\s)|--profile-directory(?:=|\\s)|\\s-P\\s)'",
-  "$processes = Get-CimInstance Win32_Process | Where-Object { $_.Name -match $known -or ($_.Name -match '(?i)\\.exe$' -and $_.CommandLine -match $profileArgs) } | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, CreationDate",
+  "$windows = @{}; Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { $windows[[int]$_.Id] = $_.MainWindowTitle }",
+  "$processes = Get-CimInstance Win32_Process | Where-Object { $_.Name -match $known -or ($_.Name -match '(?i)\\.exe$' -and $_.CommandLine -match $profileArgs) } | ForEach-Object { $windowTitle = $windows[[int]$_.ProcessId]; [PSCustomObject]@{ ProcessId=$_.ProcessId; ParentProcessId=$_.ParentProcessId; Name=$_.Name; ExecutablePath=$_.ExecutablePath; CommandLine=$_.CommandLine; CreationDate=$_.CreationDate; WindowTitle=$windowTitle; HasVisibleWindow=[bool]$windowTitle } }",
   '$processes | ConvertTo-Json -Compress',
 ].join('; ')
+
+export interface BrowserDiscoveryProvider {
+  readonly id: string
+  readonly supportedPlatforms: readonly string[]
+  discover(): Promise<BrowserDiscoverySnapshot>
+}
+
+export class BrowserDiscoveryRegistry {
+  constructor(private readonly providers: readonly BrowserDiscoveryProvider[]) {}
+
+  async discover(platform = process.platform): Promise<BrowserDiscoverySnapshot> {
+    const provider = this.providers.find((candidate) => candidate.supportedPlatforms.includes(platform))
+    if (!provider) {
+      return {
+        platform,
+        scannedAt: Date.now(),
+        status: 'unsupported',
+        processes: [],
+        message: 'Для платформы ' + platform + ' пока нет провайдера обнаружения браузеров.',
+      }
+    }
+    return provider.discover()
+  }
+}
 
 interface RawWindowsProcess {
   ProcessId?: number
@@ -21,16 +46,28 @@ interface RawWindowsProcess {
   ExecutablePath?: string | null
   CommandLine?: string | null
   CreationDate?: string | null
+  WindowTitle?: string | null
+  HasVisibleWindow?: boolean
 }
 
 const FIREFOX_PRODUCTS: Record<string, string> = {
-  'zen.exe': 'Zen Browser', 'firefox.exe': 'Firefox', 'librewolf.exe': 'LibreWolf',
-  'floorp.exe': 'Floorp', 'waterfox.exe': 'Waterfox',
+  'zen.exe': 'Zen Browser',
+  'firefox.exe': 'Firefox',
+  'librewolf.exe': 'LibreWolf',
+  'floorp.exe': 'Floorp',
+  'waterfox.exe': 'Waterfox',
 }
+
 const CHROMIUM_PRODUCTS: Record<string, string> = {
-  'chrome.exe': 'Google Chrome', 'msedge.exe': 'Microsoft Edge', 'brave.exe': 'Brave',
-  'vivaldi.exe': 'Vivaldi', 'opera.exe': 'Opera', 'chromium.exe': 'Chromium',
-  'thorium.exe': 'Thorium', 'arc.exe': 'Arc', 'sidekick.exe': 'Sidekick',
+  'chrome.exe': 'Google Chrome',
+  'msedge.exe': 'Microsoft Edge',
+  'brave.exe': 'Brave',
+  'vivaldi.exe': 'Vivaldi',
+  'opera.exe': 'Opera',
+  'chromium.exe': 'Chromium',
+  'thorium.exe': 'Thorium',
+  'arc.exe': 'Arc',
+  'sidekick.exe': 'Sidekick',
 }
 
 export function tokenizeWindowsCommandLine(commandLine: string): string[] {
@@ -77,14 +114,14 @@ function readFlagValue(args: string[], names: string[]): string | undefined {
   return undefined
 }
 
-function classifyBrowser(executableName: string, args: string[]): { family: BrowserFamily; product: string; confidence: DiscoveryConfidence } | null {
+function classifyBrowser(executableName: string, args: string[]): { family: BrowserFamily; product: string } | null {
   const name = executableName.toLowerCase()
-  if (FIREFOX_PRODUCTS[name]) return { family: 'firefox', product: FIREFOX_PRODUCTS[name], confidence: 'high' }
-  if (CHROMIUM_PRODUCTS[name]) return { family: 'chromium', product: CHROMIUM_PRODUCTS[name], confidence: 'high' }
+  if (FIREFOX_PRODUCTS[name]) return { family: 'firefox', product: FIREFOX_PRODUCTS[name] }
+  if (CHROMIUM_PRODUCTS[name]) return { family: 'chromium', product: CHROMIUM_PRODUCTS[name] }
   const hasProfileFlag = args.some((arg) => /^(--user-data-dir=|--profile-directory=|-profile$|--profile$)/i.test(arg))
   const hasFirefoxProfileFlag = args.some((arg) => arg.toLowerCase() === '-profile')
   if (!name.endsWith('.exe') || !hasProfileFlag || (!name.includes('browser') && !hasFirefoxProfileFlag)) return null
-  return { family: 'unknown', product: path.basename(executableName, '.exe'), confidence: 'low' }
+  return { family: 'unknown', product: path.basename(executableName, '.exe') }
 }
 
 export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDescriptor[] {
@@ -109,7 +146,6 @@ export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDesc
     const profileSource: BrowserProcessDescriptor['profileSource'] = firefoxProfile
       ? 'firefox-profile-argument'
       : chromiumUserData ? 'chromium-user-data-dir' : genericProfile ? 'generic-profile-argument' : 'default-or-unknown'
-    const confidence: DiscoveryConfidence = classification.family === 'unknown' ? 'low' : profilePath ? 'high' : 'medium'
     descriptors.push({
       id: 'windows-process:' + row.ProcessId,
       processId: row.ProcessId,
@@ -119,10 +155,12 @@ export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDesc
       family: classification.family,
       product: classification.product,
       startedAt: typeof row.CreationDate === 'string' ? row.CreationDate : undefined,
+      windowTitle: typeof row.WindowTitle === 'string' && row.WindowTitle ? row.WindowTitle : undefined,
+      hasVisibleWindow: row.HasVisibleWindow === true,
       profilePath,
       profileName,
       profileSource,
-      confidence,
+      confidence: classification.family === 'unknown' ? 'low' : profilePath ? 'high' : 'medium',
     })
   }
   const browserProcessIds = new Set(descriptors.map((descriptor) => descriptor.processId))
@@ -130,13 +168,12 @@ export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDesc
   return roots.sort((left, right) => left.product.localeCompare(right.product) || left.processId - right.processId)
 }
 
-export class BrowserDiscoveryService {
+export class WindowsBrowserDiscoveryProvider implements BrowserDiscoveryProvider {
+  readonly id = 'windows-process-discovery'
+  readonly supportedPlatforms = ['win32'] as const
+
   async discover(): Promise<BrowserDiscoverySnapshot> {
     const scannedAt = Date.now()
-    if (process.platform !== 'win32') return {
-      platform: process.platform, scannedAt, status: 'unsupported', processes: [],
-      message: 'Обнаружение процессов пока реализовано только для Windows.',
-    }
     try {
       const { stdout } = await execFileAsync(
         'powershell.exe',
@@ -146,17 +183,35 @@ export class BrowserDiscoveryService {
       const parsed = stdout.trim() ? JSON.parse(stdout) as unknown : []
       const processes = parseWindowsBrowserProcesses(parsed)
       return {
-        platform: process.platform, scannedAt, status: 'available', processes,
+        platform: 'win32',
+        scannedAt,
+        status: 'available',
+        processes,
         message: processes.length
-          ? 'Обнаружено процессов браузеров: ' + processes.length + '. Это не подтверждает подключение расширения или авторизацию.'
+          ? 'Обнаружено корневых процессов браузеров: ' + processes.length + '. Это не подтверждает подключение расширения или авторизацию.'
           : 'Запущенные поддерживаемые браузерные процессы не обнаружены.',
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Неизвестная ошибка обнаружения.'
       return {
-        platform: process.platform, scannedAt, status: 'error', processes: [],
+        platform: 'win32',
+        scannedAt,
+        status: 'error',
+        processes: [],
         message: 'Не удалось получить список процессов браузеров: ' + message.slice(0, 300),
       }
     }
+  }
+}
+
+export class BrowserDiscoveryService {
+  private readonly registry: BrowserDiscoveryRegistry
+
+  constructor(providers: readonly BrowserDiscoveryProvider[] = [new WindowsBrowserDiscoveryProvider()]) {
+    this.registry = new BrowserDiscoveryRegistry(providers)
+  }
+
+  discover(): Promise<BrowserDiscoverySnapshot> {
+    return this.registry.discover()
   }
 }

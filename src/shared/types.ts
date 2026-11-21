@@ -81,6 +81,8 @@ export interface BrowserProcessDescriptor {
   family: BrowserFamily
   product: string
   startedAt?: string
+  windowTitle?: string
+  hasVisibleWindow: boolean
   profilePath?: string
   profileName?: string
   profileSource: 'firefox-profile-argument' | 'chromium-user-data-dir' | 'generic-profile-argument' | 'default-or-unknown'

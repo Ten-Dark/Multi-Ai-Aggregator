@@ -61,11 +61,11 @@ export function BrowserDiscoveryPanel() {
                 <article className="discovery-item" key={process.id}>
                   <div className="discovery-item-main">
                     <strong>{process.product}</strong>
-                    <span>{process.executableName} · PID {process.processId}</span>
+                    <span>{process.executableName} · PID {process.processId}{process.hasVisibleWindow ? ' · Есть окно' : ''}</span>
                   </div>
                   <div className="discovery-item-details">
                     <span>{process.profilePath ? `Профиль: ${process.profilePath}` : process.profileName ? `Имя профиля: ${process.profileName}` : 'Путь профиля не передан в параметрах запуска'}</span>
-                    <span>Семейство: {process.family} · Достоверность: {process.confidence}</span>
+                    <span>{process.windowTitle ? `Окно: ${process.windowTitle}` : 'Видимое окно не обнаружено'} · Семейство: {process.family} · Достоверность: {process.confidence}</span>
                   </div>
                 </article>
               ))}

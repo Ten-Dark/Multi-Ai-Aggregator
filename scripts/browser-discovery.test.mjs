@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseWindowsBrowserProcesses } from '../dist-electron/main/browser/browser-discovery.js'
+import { BrowserDiscoveryRegistry, parseWindowsBrowserProcesses } from '../dist-electron/main/browser/browser-discovery.js'
 
 test('discovers Zen portable profile from a quoted Firefox-family command line', () => {
   const result = parseWindowsBrowserProcesses({
@@ -107,4 +107,39 @@ test('keeps separate browser profile roots as independent candidates', () => {
 
   assert.equal(result.length, 2)
   assert.deepEqual(result.map((item) => item.profilePath), ['X:\\Profile One', 'Y:\\Profile Two'])
+})
+
+test('includes visible window metadata when supplied by the OS provider', () => {
+  const result = parseWindowsBrowserProcesses({
+    ProcessId: 40,
+    ParentProcessId: 1,
+    Name: 'zen.exe',
+    CommandLine: 'zen.exe -profile "X:\\ZenProfile"',
+    WindowTitle: 'ChatGPT — Zen Browser',
+    HasVisibleWindow: true,
+  })
+
+  assert.equal(result[0].hasVisibleWindow, true)
+  assert.equal(result[0].windowTitle, 'ChatGPT — Zen Browser')
+})
+
+test('registry selects a matching provider and reports unsupported platforms explicitly', async () => {
+  let calls = 0
+  const provider = {
+    id: 'fake-linux-provider',
+    supportedPlatforms: ['linux'],
+    async discover() {
+      calls += 1
+      return { platform: 'linux', scannedAt: 123, status: 'available', processes: [], message: 'ok' }
+    },
+  }
+  const registry = new BrowserDiscoveryRegistry([provider])
+  const supported = await registry.discover('linux')
+  const unsupported = await registry.discover('darwin')
+
+  assert.equal(supported.status, 'available')
+  assert.equal(calls, 1)
+  assert.equal(unsupported.status, 'unsupported')
+  assert.equal(unsupported.platform, 'darwin')
+  assert.equal(calls, 1)
 })

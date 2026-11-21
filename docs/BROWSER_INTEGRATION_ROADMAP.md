@@ -1,6 +1,6 @@
 # Browser Integration and Self-Healing Roadmap
 
-**Status:** Stage 0 complete; Stage 1 discovery MVP implemented and awaiting broader validation.
+**Status:** Stage 0 complete; Stage 1 Windows discovery provider and OS provider registry implemented. Windows live smoke validation passed; other OS providers are not implemented.
 **Architecture:** [Browser Integration Architecture](./BROWSER_INTEGRATION_ARCHITECTURE.md)
 **Decision:** [ADR 0001 — User-Browser-First Integration](./adr/0001-user-browser-first-integration.md)
 **Architecture baseline commit:** 0363ad3
@@ -38,9 +38,9 @@
 **Goal:** Reliably discover running browser instances and profile candidates without touching browser data.
 
 - [x] S1.1 Define shared BrowserFamily, BrowserProcessDescriptor, and DiscoveryConfidence types. Profile/instance aggregation remains a follow-up.
-- [ ] S1.2 Define BrowserDiscoveryProvider interface and OS provider registry.
+- [x] S1.2 Define BrowserDiscoveryProvider interface and OS provider registry.
 - [x] S1.3 Implement read-only Windows process enumeration in an isolated discovery service; no profile database access.
-- [ ] S1.4 Parse process executable, command line, parent/child relationships, start time, and visible-window metadata.
+- [x] S1.4 Parse process executable, command line, parent/child relationships, start time, and visible-window metadata.
 - [x] S1.5 Parse Firefox-family -profile and Chromium --user-data-dir / --profile-directory arguments.
 - [ ] S1.6 Add browser family/product identification from executable metadata and process metadata; support unknown/custom browser products.
 - [x] S1.7 Add deterministic fixtures for quoted paths, spaces, Unicode, missing flags, custom executables, and child processes.
@@ -156,10 +156,12 @@
 
 ## Stage 1 implementation status
 
-The first Windows discovery slice is implemented in `src/main/browser/browser-discovery.ts` and exposed through a narrow IPC/preload API. The renderer displays discovered root browser processes, executable paths, profile candidates, and confidence. The process scan is read-only and does not inspect cookies, profile databases, extension storage, or provider pages.
+The Windows discovery implementation is in `src/main/browser/browser-discovery.ts`. `BrowserDiscoveryProvider` and `BrowserDiscoveryRegistry` isolate OS-specific discovery from the application-facing service; Windows currently has the only concrete provider. The renderer displays executable identity, process ID, profile candidate, confidence, and visible-window metadata. The scan is read-only and does not inspect cookies, profile databases, extension storage, or provider pages.
 
-Live Windows smoke validation identified the active Zen process and its `X:\\BrowserPortal\\ZenProfile` profile. Browser process detection remains distinct from extension connection, tab discovery, and provider authentication. Generic unknown executable candidates are intentionally conservative to avoid classifying Electron apps such as Discord or Docker as browsers.
+Live Windows smoke validation identified the active Zen process, its `X:\\BrowserPortal\\ZenProfile` profile, and a visible Zen window title. The process scan is path-independent. Browser process detection remains distinct from extension connection, tab discovery, and provider authentication. Generic unknown executable candidates are intentionally conservative to avoid classifying unrelated Electron apps as browsers.
 
-## First implementation slice after Stage 0
+macOS and Linux are deliberately reported as unsupported until their providers exist and pass platform-specific tests. The registry is ready for those providers, but this is not a claim of cross-platform discovery support.
 
-Start Stage 1 with typed discovery contracts and a Windows read-only provider. Do not begin multi-connector protocol changes until the current bridge's peer ownership and handshake behavior have been audited and captured in tests. This keeps the first implementation low-risk and provides the process/profile inventory needed to diagnose the user's current Zen instance.
+## Next implementation slice
+
+Complete browser product identification using executable metadata, then implement macOS and Linux providers. After Stage 1 acceptance, move to the browser-neutral connector abstraction. Do not begin multi-connector protocol changes until current bridge peer ownership and handshake behavior have been audited and captured in tests.
