@@ -48,6 +48,21 @@ test('supports split profile flags and Unicode portable paths', () => {
   assert.equal(result[0].profilePath, 'X:\\Браузеры\\Рабочий профиль')
 })
 
+test('recognizes Firefox profile selection by name without misreporting it as a path', () => {
+  const result = parseWindowsBrowserProcesses({
+    ProcessId: 204,
+    ParentProcessId: 1,
+    Name: 'firefox.exe',
+    CommandLine: '"C:\\Apps\\Firefox\\firefox.exe" -P "Work Profile"',
+  })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].profilePath, undefined)
+  assert.equal(result[0].profileName, 'Work Profile')
+  assert.equal(result[0].profileSource, 'firefox-profile-name-argument')
+  assert.equal(result[0].confidence, 'medium')
+})
+
 test('keeps default profile inference explicit and lower confidence', () => {
   const result = parseWindowsBrowserProcesses({
     ProcessId: 202,

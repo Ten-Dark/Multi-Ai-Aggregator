@@ -174,17 +174,19 @@ export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDesc
     const classification = classifyBrowser(row.Name, args, row)
     if (!classification) continue
     const firefoxProfile = classification.family === 'firefox' ? readFlagValue(args, ['-profile', '--profile']) : undefined
+    const firefoxProfileName = classification.family === 'firefox' ? readFlagValue(args, ['-P']) : undefined
     const chromiumUserData = classification.family === 'chromium' ? readFlagValue(args, ['--user-data-dir']) : undefined
     const chromiumProfile = classification.family === 'chromium' ? readFlagValue(args, ['--profile-directory']) : undefined
     const genericProfile = classification.family === 'unknown' ? readFlagValue(args, ['-profile', '--profile', '--user-data-dir']) : undefined
     const profilePath = firefoxProfile || chromiumUserData || genericProfile
-    const profileName = chromiumProfile || undefined
+    const profileName = chromiumProfile || firefoxProfileName || undefined
     const executablePath = typeof row.ExecutablePath === 'string' ? row.ExecutablePath : undefined
-    const instanceIdentity = [classification.family, classification.product, (executablePath || row.Name).toLowerCase(), (profilePath || 'default').toLowerCase()].join('\\0')
+    const instanceIdentity = [classification.family, classification.product, (executablePath || row.Name).toLowerCase(), (profilePath || 'default').toLowerCase(), (profileName || 'default-profile').toLowerCase()].join('\\0')
     const instanceId = 'browser-instance:' + createHash('sha256').update(instanceIdentity).digest('hex').slice(0, 20)
     const profileSource: BrowserProcessDescriptor['profileSource'] = firefoxProfile
       ? 'firefox-profile-argument'
-      : chromiumUserData ? 'chromium-user-data-dir' : genericProfile ? 'generic-profile-argument' : 'default-or-unknown'
+      : firefoxProfileName ? 'firefox-profile-name-argument'
+        : chromiumUserData ? 'chromium-user-data-dir' : genericProfile ? 'generic-profile-argument' : 'default-or-unknown'
     descriptors.push({
       id: 'windows-process:' + row.ProcessId,
       instanceId,
