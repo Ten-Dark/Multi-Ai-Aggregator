@@ -1,8 +1,11 @@
 # Provider Runtime Architecture
 
-**Status:** Proposed architecture; implementation has not started
-**Baseline:** `1262368` (`fix(cancellation): abort extension tasks on bridge disconnect`)
-**Scope:** App-owned AI web sessions, browser automation reliability, provider diagnostics, and answer-quality improvements
+**Status:** Legacy proposal; app-owned-session-first direction superseded for browser hosting
+**Canonical browser architecture:** [Browser Integration Architecture](./BROWSER_INTEGRATION_ARCHITECTURE.md)
+**Canonical browser decision:** [ADR 0001 — User-Browser-First Integration](./adr/0001-user-browser-first-integration.md)
+**Scope retained:** Provider automation reliability, session evidence, diagnostics, and answer-quality improvements
+
+> This document remains a useful source for provider automation contracts and safety requirements. Its proposal to make app-owned browser profiles the primary runtime is superseded. The default integration target is the user's already-running browser/profile through a browser connector; a managed browser context is an explicit fallback.
 **Constraint:** Use public AI web interfaces; do not require paid API keys or bypass platform access controls.
 
 ## 1. Context and goals

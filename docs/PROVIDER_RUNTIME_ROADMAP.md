@@ -1,9 +1,11 @@
 # Provider Runtime and Web-Agent Reliability Roadmap
 
-**Status:** Planning baseline
-**Architecture reference:** [`PROVIDER_RUNTIME_ARCHITECTURE.md`](./PROVIDER_RUNTIME_ARCHITECTURE.md)
-**Starting commit:** `1262368`
-**Implementation status:** P0/P1 reliability work is in progress. See [`PROVIDER_RUNTIME_BASELINE.md`](./PROVIDER_RUNTIME_BASELINE.md) for the current evidence and remaining blockers.
+**Status:** Legacy provider-automation workstream; browser-host planning superseded
+**Canonical browser roadmap:** [Browser Integration Roadmap](./BROWSER_INTEGRATION_ROADMAP.md)
+**Provider automation reference:** [Provider Runtime Architecture](./PROVIDER_RUNTIME_ARCHITECTURE.md)
+**Implementation baseline:** See [Provider Runtime Baseline](./PROVIDER_RUNTIME_BASELINE.md) for current evidence and remaining automation blockers.
+
+> Use this roadmap for provider automation, submission safety, extraction, and synthesis tasks. Browser discovery, browser-family support, connector lifecycle, and self-healing must follow the Browser Integration Architecture and Roadmap.
 
 ## Principles
 
