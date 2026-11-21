@@ -121,7 +121,7 @@ function waitForClose(socket, sendOnOpen) {
       reject(error)
     })
     if (socket.readyState === WebSocket.OPEN) sendOnOpen()
-    else socket.once('open', sendOnOpen)
+    else if (socket.readyState === WebSocket.CONNECTING) socket.once('open', sendOnOpen)
   })
 }
 
@@ -156,6 +156,16 @@ function authenticate(wsUrl, origin, token) {
   })
 }
 
+test('can restart the bridge after a clean shutdown', async (t) => {
+  const { bridge, connection } = await createBridge(t, 'multi-ai-restart-test-')
+  await bridge.close()
+
+  const restarted = await bridge.start()
+  assert.equal(restarted.status, 'starting')
+  assert.equal(bridge.getZenConnection().wsUrl, connection.wsUrl)
+  assert.equal(bridge.getBrowserInfo().status, 'starting')
+})
+
 test('rejects WebSocket messages larger than the bridge payload limit', async (t) => {
   const { connection } = await createBridge(t, 'multi-ai-payload-test-')
   const socket = new WebSocket(connection.wsUrl, { origin: APPROVED_ORIGIN })
@@ -183,6 +193,34 @@ test('rejects unsupported message types after authentication', async (t) => {
   assert.equal(result.accepted, true)
   const closeCode = await waitForClose(result.socket, () => result.socket.send(JSON.stringify({ type: 'unexpected' })))
   assert.equal(closeCode, 1008)
+})
+
+test('revokes a replaced WebSocket before its asynchronous close event', async (t) => {
+  const { connection, token } = await createBridge(t, 'multi-ai-replacement-test-')
+  const first = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(first.accepted, true)
+
+  const second = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(second.accepted, true)
+
+  if (first.socket.readyState !== WebSocket.CLOSED) {
+    const closeCode = await waitForClose(first.socket, () => {
+      if (first.socket.readyState === WebSocket.OPEN) {
+        first.socket.send(JSON.stringify({ type: 'ping' }))
+      }
+    })
+    assert.equal(closeCode, 1008)
+  }
+
+  const pong = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Active socket did not answer ping.')), 2000)
+    second.socket.once('message', (raw) => {
+      clearTimeout(timer)
+      resolve(JSON.parse(raw.toString()))
+    })
+  })
+  second.socket.send(JSON.stringify({ type: 'ping' }))
+  assert.deepEqual(await pong, { type: 'pong' })
 })
 
 test('rejects an invalid pairing token', async (t) => {

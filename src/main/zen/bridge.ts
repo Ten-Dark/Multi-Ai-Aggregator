@@ -186,7 +186,6 @@ export class ZenBridge {
 
   async start(): Promise<BrowserInfo> {
     if (this.started) return this.getBrowserInfo()
-    this.started = true
     this.setInfo({
       status: 'starting',
       browserName: 'Zen Browser',
@@ -237,6 +236,7 @@ export class ZenBridge {
       throw new Error(message)
     }
 
+    this.started = true
     this.server.on('connection', (socket, request) => {
       this.handleConnection(socket, request)
     })
@@ -324,6 +324,11 @@ export class ZenBridge {
         return
       }
 
+      if (socket !== this.socket || !this.authenticated) {
+        socket.close(1008, 'Connection has been replaced')
+        return
+      }
+
       if (message.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }))
         return
@@ -363,15 +368,17 @@ export class ZenBridge {
   }
 
   private adoptSocket(socket: WebSocket, extensionVersion: unknown): void {
-    if (this.socket && this.socket !== socket) {
+    const previousSocket = this.socket
+    // Revoke the previous connection synchronously before closing it; its close event is asynchronous.
+    this.socket = socket
+    this.authenticated = true
+    if (previousSocket && previousSocket !== socket) {
       try {
-        this.socket.close(1008, 'Replaced by a new connection')
+        previousSocket.close(1008, 'Replaced by a new connection')
       } catch {
         // Ignore.
       }
     }
-    this.socket = socket
-    this.authenticated = true
     this.extensionVersion = typeof extensionVersion === 'string' ? extensionVersion : undefined
     socket.send(JSON.stringify({ type: 'auth-ok', serverVersion: '0.1.0' }))
     this.setInfo({
@@ -710,6 +717,8 @@ export class ZenBridge {
     if (httpServer) {
       await new Promise<void>((resolve) => httpServer.close(() => resolve()))
     }
+    this.started = false
+    this.port = 0
     this.info = { status: 'stopped', browserName: 'Zen Browser' }
   }
 }
