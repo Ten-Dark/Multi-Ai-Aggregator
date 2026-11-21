@@ -17,6 +17,7 @@ import {
   type ZenConnectionInfo,
 } from '../../shared/types.js'
 import { buildSynthesisPrompt } from '../automation/synthesis-prompt.js'
+import { isAllowedZenExtensionOrigin, isValidZenExtensionOrigin } from './origin.js'
 
 const DEFAULT_PORT = 45123
 const PORT_ATTEMPTS = 12
@@ -87,6 +88,8 @@ function tokensEqual(expected: string, received: string): boolean {
 export class ZenBridge {
   private readonly token: string
   private readonly tokenFile: string
+  private readonly extensionOriginFile: string
+  private approvedExtensionOrigin: string | null = null
   private server: WebSocketServer | null = null
   private httpServer: http.Server | null = null
   private socket: WebSocket | null = null
@@ -110,7 +113,42 @@ export class ZenBridge {
     private readonly emit: EmitFn,
   ) {
     this.tokenFile = path.join(dataDir, 'zen-bridge-token')
+    this.extensionOriginFile = path.join(dataDir, 'zen-bridge-origin')
     this.token = this.loadOrCreateToken()
+    this.approvedExtensionOrigin = this.loadApprovedExtensionOrigin()
+  }
+
+  private loadApprovedExtensionOrigin(): string | null {
+    try {
+      const origin = fs.readFileSync(this.extensionOriginFile, 'utf8').trim()
+      if (!isValidZenExtensionOrigin(origin)) {
+        throw new Error('Stored Zen extension origin is invalid.')
+      }
+      return origin
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return null
+      }
+      throw error
+    }
+  }
+
+  private approveExtensionOrigin(origin: string): boolean {
+    if (this.approvedExtensionOrigin) return this.approvedExtensionOrigin === origin
+    try {
+      fs.mkdirSync(path.dirname(this.extensionOriginFile), { recursive: true })
+      fs.writeFileSync(this.extensionOriginFile, origin, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      this.approvedExtensionOrigin = origin
+      return true
+    } catch (error) {
+      // Another connection may have completed first; only accept its exact origin.
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+        this.approvedExtensionOrigin = this.loadApprovedExtensionOrigin()
+        return this.approvedExtensionOrigin === origin
+      }
+      console.error('[zen-bridge] Could not persist the approved extension origin:', error)
+      return false
+    }
   }
 
   private loadOrCreateToken(): string {
@@ -237,7 +275,7 @@ export class ZenBridge {
 
   private handleConnection(socket: WebSocket, request: IncomingMessage): void {
     const origin = request.headers.origin || ''
-    if (!origin.startsWith('moz-extension://')) {
+    if (!isAllowedZenExtensionOrigin(origin, this.approvedExtensionOrigin)) {
       socket.close(1008, 'Origin is not allowed')
       return
     }
@@ -263,6 +301,14 @@ export class ZenBridge {
         if (!tokensEqual(this.token, received)) {
           socket.send(JSON.stringify({ type: 'auth-error', message: 'Неверный код подключения.' }))
           socket.close(1008, 'Invalid token')
+          return
+        }
+        if (!this.approveExtensionOrigin(origin)) {
+          socket.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Не удалось закрепить источник расширения. Проверьте доступ к каталогу данных приложения.',
+          }))
+          socket.close(1011, 'Could not persist extension origin')
           return
         }
         authenticated = true
