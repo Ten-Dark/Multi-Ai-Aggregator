@@ -15,6 +15,7 @@ function loadPreload() {
     },
     removeListener: (channel, handler) => {
       removed = channel === 'aggregator:event' && handler === listener
+      if (removed) listener = undefined
     },
   }
   const contextBridge = {
@@ -61,6 +62,8 @@ test('preload forwards valid typed events and ignores malformed payloads', () =>
   assert.equal(received.length, validEvents.length)
   unsubscribe()
   assert.equal(preload.wasRemoved(), true)
+  preload.dispatch(validEvents[0])
+  assert.equal(received.length, validEvents.length)
 })
 
 test('preload safely ignores non-function event subscribers', () => {

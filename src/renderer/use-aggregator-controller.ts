@@ -10,6 +10,7 @@ import {
   type TaskStatus,
   type ZenConnectionInfo,
 } from '../shared/types'
+import { EventSnapshotTracker, type SnapshotKey } from '../shared/event-snapshot'
 
 const TASK_LABELS: Record<TaskStatus, string> = {
   idle: 'Ожидает запроса',
@@ -92,6 +93,7 @@ export function useAggregatorController() {
   const [globalError, setGlobalError] = useState('')
   const [copiedKey, setCopiedKey] = useState('')
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const snapshotTracker = useRef(new EventSnapshotTracker()).current
 
   const zenConnected = Boolean(zenConnection?.connected)
   const taskInProgress = useMemo(
@@ -130,6 +132,10 @@ export function useAggregatorController() {
   ).length
 
   const refreshSessions = useCallback(async () => {
+    const sessionVersions = MODEL_IDS.map((model) => [
+      model,
+      snapshotTracker.capture(('session:' + model) as SnapshotKey),
+    ] as const)
     setCheckingSessions(true)
     setSessions((current) => {
       const next = { ...current }
@@ -142,7 +148,15 @@ export function useAggregatorController() {
       const list = await window.aggregator.checkSessions()
       setSessions((current) => {
         const next = { ...current }
-        for (const session of list) next[session.model] = session
+        for (const session of list) {
+          const capturedVersion = sessionVersions.find(([model]) => model === session.model)?.[1]
+          if (
+            capturedVersion !== undefined &&
+            snapshotTracker.isCurrent(('session:' + session.model) as SnapshotKey, capturedVersion)
+          ) {
+            next[session.model] = session
+          }
+        }
         return next
       })
     } catch (error) {
@@ -151,7 +165,13 @@ export function useAggregatorController() {
       setSessions((current) => {
         const next = { ...current }
         for (const model of MODEL_IDS) {
-          next[model] = { model, status: 'error', message }
+          const capturedVersion = sessionVersions.find(([candidate]) => candidate === model)?.[1]
+          if (
+            capturedVersion !== undefined &&
+            snapshotTracker.isCurrent(('session:' + model) as SnapshotKey, capturedVersion)
+          ) {
+            next[model] = { model, status: 'error', message }
+          }
         }
         return next
       })
@@ -162,9 +182,16 @@ export function useAggregatorController() {
 
   useEffect(() => {
     const unsubscribe = window.aggregator.onEvent((event) => {
-      if (event.type === 'browser') setBrowser(event.browser)
-      if (event.type === 'zen-connection') setZenConnection(event.connection)
+      if (event.type === 'browser') {
+        snapshotTracker.markEvent('browser')
+        setBrowser(event.browser)
+      }
+      if (event.type === 'zen-connection') {
+        snapshotTracker.markEvent('zenConnection')
+        setZenConnection(event.connection)
+      }
       if (event.type === 'session') {
+        snapshotTracker.markEvent(('session:' + event.session.model) as SnapshotKey)
         setSessions((current) => ({ ...current, [event.session.model]: event.session }))
       }
       if (event.type === 'model') {
@@ -172,11 +199,22 @@ export function useAggregatorController() {
       }
     })
 
+    const browserVersion = snapshotTracker.capture('browser')
     void window.aggregator
       .getBrowserInfo()
-      .then(setBrowser)
+      .then((info) => {
+        if (snapshotTracker.isCurrent('browser', browserVersion)) setBrowser(info)
+      })
       .catch(() => {})
-    void window.aggregator.getZenConnection().then(setZenConnection).catch(() => {})
+    const zenConnectionVersion = snapshotTracker.capture('zenConnection')
+    void window.aggregator
+      .getZenConnection()
+      .then((connection) => {
+        if (snapshotTracker.isCurrent('zenConnection', zenConnectionVersion)) {
+          setZenConnection(connection)
+        }
+      })
+      .catch(() => {})
     void refreshSessions()
 
     return () => {
