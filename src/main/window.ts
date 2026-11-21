@@ -7,6 +7,33 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
 
+function getTrustedDevRendererUrl(): string | null {
+  if (app.isPackaged) return null
+
+  const candidate = process.env.ELECTRON_RENDERER_URL
+  if (!candidate) return null
+
+  try {
+    const url = new URL(candidate)
+    const isTrusted =
+      url.protocol === 'http:' &&
+      url.hostname === 'localhost' &&
+      url.port === '5173' &&
+      url.pathname === '/' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+
+    if (isTrusted) return url.toString()
+  } catch {
+    // Fall back to the packaged renderer for malformed development URLs.
+  }
+
+  console.error('[main] Ignoring an untrusted ELECTRON_RENDERER_URL.')
+  return null
+}
+
 export function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
@@ -35,9 +62,9 @@ export function createWindow(): BrowserWindow {
     event.preventDefault()
   })
 
-  const devServerUrl = process.env.ELECTRON_RENDERER_URL
-  if (devServerUrl) {
-    void window.loadURL(devServerUrl)
+  const devRendererUrl = getTrustedDevRendererUrl()
+  if (devRendererUrl) {
+    void window.loadURL(devRendererUrl)
   } else {
     void window.loadFile(path.join(__dirname, '../renderer/index.html'))
   }

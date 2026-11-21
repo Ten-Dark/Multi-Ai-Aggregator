@@ -55,6 +55,22 @@ async function setPairing(code) {
   await browser.storage.local.set({ [PAIRING_KEY]: code })
 }
 
+async function applyIntegrationPairing() {
+  const manifest = browser.runtime.getManifest()
+  if (manifest.name !== 'Multi-AI Aggregator Bridge [Integration Test]') return
+
+  try {
+    const response = await fetch(browser.runtime.getURL('dev-pairing.json'), { cache: 'no-store' })
+    if (!response.ok) return
+    const data = await response.json()
+    if (data && typeof data.code === 'string' && data.code.trim()) {
+      await setPairing(data.code.trim())
+    }
+  } catch {
+    // Integration-only pairing data is absent.
+  }
+}
+
 function parsePairing(code) {
   const trimmed = String(code || '').trim()
   const separator = trimmed.lastIndexOf('|')
@@ -76,45 +92,7 @@ function parsePairing(code) {
   return { url: parsed.toString(), token }
 }
 
-const PAIR_PORTS = [45123, 45124, 45125, 45126, 45127, 45128, 45129, 45130, 45131, 45132, 45133, 45134]
 
-// Ask the local app for its pairing token. The bridge only answers requests
-// coming from an extension origin, so ordinary web pages cannot read it.
-async function discoverPairing() {
-  for (const port of PAIR_PORTS) {
-    try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 1200)
-      const response = await fetch(`http://127.0.0.1:${port}/pair`, {
-        cache: 'no-store',
-        signal: controller.signal,
-      })
-      clearTimeout(timer)
-      if (!response.ok) continue
-      const data = await response.json()
-      if (data && typeof data.wsUrl === 'string' && typeof data.token === 'string') {
-        return `${data.wsUrl}|${data.token}`
-      }
-    } catch {
-      // No bridge on this port.
-    }
-  }
-  return ''
-}
-
-async function maybeApplyDevPairing() {
-  if (await getPairing()) return
-  try {
-    const response = await fetch(browser.runtime.getURL('dev-pairing.json'), { cache: 'no-store' })
-    if (!response.ok) return
-    const data = await response.json()
-    if (data && typeof data.code === 'string' && data.code.trim()) {
-      await setPairing(data.code.trim())
-    }
-  } catch {
-    // dev-pairing.json is absent in production builds.
-  }
-}
 
 async function connect() {
   if (reconnectTimer) {
@@ -125,18 +103,9 @@ async function connect() {
     return
   }
 
-  let code = await getPairing()
+  const code = await getPairing()
   if (!code) {
-    setStatus('connecting', 'Ищу Multi-AI Aggregator на этом компьютере…')
-    code = await discoverPairing()
-    if (code) await setPairing(code)
-  }
-  if (!code) {
-    setStatus(
-      'idle',
-      'Приложение не запущено. Запустите Multi-AI Aggregator — подключение произойдёт автоматически.',
-    )
-    scheduleReconnect()
+    setStatus('idle', 'Вставьте код подключения из раздела «Подключение к Zen» в приложении.')
     return
   }
 
@@ -623,6 +592,6 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
 })
 
 void (async () => {
-  await maybeApplyDevPairing()
+  await applyIntegrationPairing()
   await connect()
 })()

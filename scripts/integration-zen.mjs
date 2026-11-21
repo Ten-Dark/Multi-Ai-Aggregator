@@ -24,10 +24,14 @@ await page.waitForSelector('h1', { timeout: 30_000 })
 const codeLocator = page.locator('.pairing-code')
 await codeLocator.waitFor({ timeout: 20_000 })
 const pairingCode = (await codeLocator.innerText()).trim()
-console.log('PAIRING_CODE', pairingCode)
+console.log('PAIRING_CODE_READY', pairingCode.startsWith('ws://127.0.0.1:') && pairingCode.includes('|'))
 if (!pairingCode.startsWith('ws://127.0.0.1:')) throw new Error('Pairing code is not ready.')
 
 fs.cpSync(path.join(project, 'zen-extension'), stage, { recursive: true })
+const manifestPath = path.join(stage, 'manifest.json')
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+manifest.name = 'Multi-AI Aggregator Bridge [Integration Test]'
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
 fs.writeFileSync(path.join(stage, 'dev-pairing.json'), JSON.stringify({ code: pairingCode }))
 execFileSync('powershell.exe', [
   '-NoProfile',
@@ -93,7 +97,12 @@ try {
   console.log('SESSIONS', panels)
 
   const connection = await page.evaluate(() => window.aggregator.getZenConnection())
-  console.log('CONNECTION', JSON.stringify(connection))
+  console.log('CONNECTION', JSON.stringify({
+    wsUrl: connection.wsUrl,
+    connected: connection.connected,
+    extensionVersion: connection.extensionVersion,
+    pairingCodePresent: Boolean(connection.pairingCode),
+  }))
 
   sendResult = await page.evaluate(() =>
     window.aggregator.sendOne('chatgpt', 'Ответь ровно одним словом: ОК'),
@@ -112,6 +121,7 @@ try {
   await page.screenshot({ path: path.join(project, 'smoke-zen.png'), fullPage: true }).catch(() => {})
   await app.close().catch(() => {})
   fs.closeSync(log)
+  fs.rmSync(root, { recursive: true, force: true })
 }
 
 console.log('RESULT', JSON.stringify({ sendStatus: sendResult?.status, sendText: sendResult?.text, sendError: sendResult?.error }))

@@ -226,44 +226,13 @@ export class ZenBridge {
     return this.getBrowserInfo()
   }
 
-  private handleHttp(request: IncomingMessage, response: ServerResponse): void {
-    const origin = request.headers.origin || ''
-    const extensionOrigin = origin.startsWith('moz-extension://')
-
-    let pathname = '/'
-    try {
-      pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname
-    } catch {
-      pathname = '/'
-    }
-
-    const respond = (status: number, body: Record<string, unknown>): void => {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-      }
-      if (extensionOrigin) headers['Access-Control-Allow-Origin'] = origin
-      response.writeHead(status, headers)
-      response.end(JSON.stringify(body))
-    }
-
-    if (request.method !== 'GET' || pathname !== '/pair') {
-      respond(404, { error: 'not-found' })
-      return
-    }
-
-    // The pairing token is handed out only to extension origins. Regular web
-    // pages are rejected and never receive a CORS grant, so a site cannot read it.
-    if (!extensionOrigin) {
-      respond(403, { error: 'forbidden' })
-      return
-    }
-
-    respond(200, {
-      wsUrl: `ws://127.0.0.1:${this.port}`,
-      token: this.token,
-      extensionVersion: this.extensionVersion,
+  private handleHttp(_request: IncomingMessage, response: ServerResponse): void {
+    response.writeHead(404, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
     })
+    response.end(JSON.stringify({ error: 'not-found' }))
   }
 
   private handleConnection(socket: WebSocket, request: IncomingMessage): void {

@@ -20,9 +20,13 @@ const waitBadge = async (timeoutMs) => {
 }
 
 try {
-  log('CODE_SHOWN', (await page.locator('.pairing-code').innerText()).trim().slice(0, 45))
+  const pairingCode = (await page.locator('.pairing-code').innerText()).trim()
+  log('CODE_SHOWN', pairingCode.startsWith('ws://127.0.0.1:') && pairingCode.includes('|'))
   log('BADGE', await waitBadge(60_000))
-  log('CONNECTION_INFO', await page.evaluate(() => window.aggregator.getZenConnection()))
+  log('CONNECTION_INFO', await page.evaluate(() => {
+    const info = window.aggregator.getZenConnection()
+    return { wsUrl: info.wsUrl, connected: info.connected, extensionVersion: info.extensionVersion }
+  }))
 
   const sessions = await page.evaluate(() => window.aggregator.checkSessions())
   log('SESSIONS', sessions.map((s) => `${s.model}=${s.status} (${s.message})`).join(' | '))
