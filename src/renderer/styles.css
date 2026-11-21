@@ -239,6 +239,7 @@ select:focus,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
 }
@@ -252,6 +253,7 @@ select:focus,
 .button-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -435,6 +437,7 @@ select:focus,
 .card-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }

@@ -177,8 +177,24 @@
     }
   }
 
-  function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw new MaiError('cancelled', 'Операция отменена.')
+  }
+
+  function delay(ms, signal) {
+    throwIfAborted(signal)
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }, ms)
+      const onAbort = () => {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        reject(new MaiError('cancelled', 'Операция отменена.'))
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
   }
 
   function matchesAny(patterns, text) {
@@ -504,20 +520,22 @@
     element.click()
   }
 
-  async function waitForSendButton(composer, timeoutMs) {
+  async function waitForSendButton(composer, timeoutMs, signal) {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
+      throwIfAborted(signal)
       const button = findSendButton(composer)
       if (button) return button
-      await delay(200)
+      await delay(200, signal)
     }
     return null
   }
 
-  async function waitForSendEvidence(before, timeoutMs) {
+  async function waitForSendEvidence(before, timeoutMs, signal) {
     const deadline = Date.now() + timeoutMs
     let lastInspectionAt = 0
     while (Date.now() < deadline) {
+      throwIfAborted(signal)
       if (Date.now() - lastInspectionAt > 1200) {
         const page = inspectPage()
         const blocker = detectBlocker(page)
@@ -529,23 +547,25 @@
       if (state.streaming) return true
       if (state.url !== before.url) return true
       if (before.composerText.trim() && !state.composerText.trim()) return true
-      await delay(350)
+      await delay(350, signal)
     }
     return false
   }
 
-  function sendProgress(phase, purpose) {
+  function sendProgress(phase, purpose, taskId) {
     try {
-      void browser.runtime.sendMessage({ type: 'mai:progress', model: MODEL, phase, purpose })
+      void browser.runtime.sendMessage({ type: 'mai:progress', taskId, model: MODEL, phase, purpose })
     } catch {
       // The background page may be restarting; progress is best-effort.
     }
   }
 
-  async function waitForComposer(timeoutMs) {
+  async function waitForComposer(timeoutMs, signal) {
+    throwIfAborted(signal)
     const deadline = Date.now() + timeoutMs
     let page = inspectPage()
     while (Date.now() < deadline) {
+      throwIfAborted(signal)
       page = inspectPage()
       const blocker = detectBlocker(page)
       if (blocker) throw blockerError(blocker)
@@ -559,29 +579,32 @@
           }
         }
       }
-      await delay(300)
+      await delay(300, signal)
     }
     throw new MaiError('site', `${adapter.label}: не найдено поле ввода. Откройте вкладку и проверьте страницу.`)
   }
 
-  async function dismissConsent() {
+  async function dismissConsent(signal) {
+    throwIfAborted(signal)
     const necessaryOnly =
       /use necessary|necessary only|only necessary|necessary cookies only|только необходим|сохранять только обязательн|только обязательн/i
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
     const target = buttons.find((button) => isVisible(button) && necessaryOnly.test(button.innerText || ''))
     if (target) {
       target.click()
-      await delay(300)
+      await delay(300, signal)
     }
   }
 
-  async function waitForAnswer(beforeCount, timeoutMs) {
+  async function waitForAnswer(beforeCount, timeoutMs, signal) {
+    throwIfAborted(signal)
     const deadline = Date.now() + timeoutMs
     let lastText = ''
     let stableSince = Date.now()
     let lastInspectionAt = 0
 
     while (Date.now() < deadline) {
+      throwIfAborted(signal)
       if (Date.now() - lastInspectionAt > 2500) {
         const page = inspectPage()
         const blocker = detectBlocker(page)
@@ -604,7 +627,8 @@
               stableFor >= (adapter.completion === 'attribute' ? Math.max(8000, adapter.stableMs) : adapter.stableMs))
 
           if (completed) {
-            await delay(250)
+            await delay(250, signal)
+            throwIfAborted(signal)
             const finalState = readAnswerState()
             const finalText = normalizeResponseText(finalState.text || text)
             if (finalText.length < 500 && matchesAny(RATE_LIMIT_PATTERNS, finalText)) {
@@ -617,7 +641,7 @@
           }
         }
       }
-      await delay(500)
+      await delay(500, signal)
     }
 
     const finalState = readAnswerState()
@@ -632,22 +656,26 @@
     throw new MaiError('timeout', `${adapter.label}: ответ не получен за ${Math.round(timeoutMs / 1000)} с.`)
   }
 
-  async function runSend(prompt, timeoutMs, purpose) {
+  async function runSend(prompt, timeoutMs, purpose, taskId, signal) {
     const startedAt = Date.now()
     const deadline = startedAt + timeoutMs
-    const composer = await waitForComposer(Math.min(45_000, timeoutMs))
-    await dismissConsent()
+    const composer = await waitForComposer(Math.min(45_000, timeoutMs), signal)
+    throwIfAborted(signal)
+    await dismissConsent(signal)
 
+    throwIfAborted(signal)
     const before = readAnswerState()
     fillComposer(composer, prompt)
-    await delay(400)
+    await delay(400, signal)
+    throwIfAborted(signal)
     const afterFill = readAnswerState()
     if (!afterFill.composerText.trim()) {
       throw new MaiError('site', `${adapter.label}: не удалось заполнить поле ввода.`)
     }
 
-    sendProgress('sending', purpose)
-    const button = await waitForSendButton(composer, 5000)
+    sendProgress('sending', purpose, taskId)
+    const button = await waitForSendButton(composer, 5000, signal)
+    throwIfAborted(signal)
     if (button) {
       clickElement(button)
     } else if (composer.form) {
@@ -657,12 +685,13 @@
     }
 
     const evidenceState = { ...afterFill, assistantCount: before.assistantCount, url: before.url }
-    let sent = await waitForSendEvidence(evidenceState, 5000)
+    let sent = await waitForSendEvidence(evidenceState, 5000, signal)
 
     if (!sent) {
+      throwIfAborted(signal)
       const form = composer.form
       if (form) form.requestSubmit()
-      sent = await waitForSendEvidence(evidenceState, 5000)
+      sent = await waitForSendEvidence(evidenceState, 5000, signal)
     }
 
     if (!sent) {
@@ -672,8 +701,20 @@
       )
     }
 
-    sendProgress('waiting', purpose)
-    return waitForAnswer(before.assistantCount, Math.max(5000, deadline - Date.now()))
+    sendProgress('waiting', purpose, taskId)
+    return waitForAnswer(before.assistantCount, Math.max(5000, deadline - Date.now()), signal)
+  }
+
+  const activeRuns = new Map()
+  const finishedRuns = new Map()
+  const cancelledBeforeStart = new Map()
+  const RUN_HISTORY_LIMIT = 128
+  const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+  function rememberRun(map, taskId, status) {
+    map.delete(taskId)
+    map.set(taskId, status)
+    while (map.size > RUN_HISTORY_LIMIT) map.delete(map.keys().next().value)
   }
 
   browser.runtime.onMessage.addListener((message) => {
@@ -690,12 +731,67 @@
     }
 
     if (message.type === 'mai:send') {
+      const taskId = message.taskId
+      if (typeof taskId !== 'string' || !TASK_ID_PATTERN.test(taskId)) {
+        return Promise.resolve({ ok: false, error: errorPayload(new MaiError('unknown', 'Некорректный идентификатор задачи.')) })
+      }
+      if (finishedRuns.has(taskId)) {
+        return Promise.resolve({ ok: false, taskId, error: errorPayload(new MaiError('busy', 'Задача с таким идентификатором уже завершена.')) })
+      }
+      if (cancelledBeforeStart.has(taskId)) {
+        cancelledBeforeStart.delete(taskId)
+        rememberRun(finishedRuns, taskId, 'cancelled')
+        return Promise.resolve({ ok: false, taskId, error: errorPayload(new MaiError('cancelled', 'Операция отменена до запуска.')) })
+      }
+      if (activeRuns.has(taskId)) {
+        return Promise.resolve({ ok: false, error: errorPayload(new MaiError('busy', 'Задача с таким идентификатором уже выполняется.')) })
+      }
       const prompt = typeof message.prompt === 'string' ? message.prompt : ''
       const timeoutMs = Number.isFinite(message.timeoutMs) ? message.timeoutMs : 240_000
       const purpose = message.purpose === 'synthesis' ? 'synthesis' : 'answer'
-      return runSend(prompt, timeoutMs, purpose)
-        .then((text) => ({ ok: true, text }))
-        .catch((error) => ({ ok: false, error: errorPayload(error) }))
+      const controller = new AbortController()
+      const run = {
+        controller,
+        promise: null,
+      }
+      run.promise = runSend(prompt, timeoutMs, purpose, taskId, controller.signal)
+        .then((text) => {
+          run.status = 'finished'
+          return { ok: true, text, taskId }
+        })
+        .catch((error) => {
+          run.status = error?.code === 'cancelled' ? 'cancelled' : 'finished'
+          return { ok: false, error: errorPayload(error), taskId }
+        })
+        .finally(() => {
+          if (activeRuns.get(taskId) === run) activeRuns.delete(taskId)
+          rememberRun(finishedRuns, taskId, run.status || 'finished')
+        })
+      activeRuns.set(taskId, run)
+      return run.promise
+    }
+
+    if (message.type === 'mai:cancel') {
+      const taskId = message.taskId
+      if (typeof taskId !== 'string' || !TASK_ID_PATTERN.test(taskId)) {
+        return Promise.resolve({ ok: false, cancelled: false, error: 'Некорректный идентификатор задачи.' })
+      }
+      const run = activeRuns.get(taskId)
+      if (!run) {
+        const finishedStatus = finishedRuns.get(taskId)
+        if (finishedStatus) {
+          return Promise.resolve({
+            ok: true,
+            cancelled: finishedStatus === 'cancelled',
+            taskId,
+            alreadyFinished: finishedStatus !== 'cancelled',
+          })
+        }
+        rememberRun(cancelledBeforeStart, taskId, 'cancelled')
+        return Promise.resolve({ ok: true, cancelled: true, taskId, pendingStart: true })
+      }
+      run.controller.abort()
+      return run.promise.then(() => ({ ok: true, cancelled: true, taskId }))
     }
 
     return undefined

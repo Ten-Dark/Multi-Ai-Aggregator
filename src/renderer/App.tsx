@@ -10,7 +10,7 @@ export function App() {
     prompt, setPrompt, lastSubmittedPrompt, results, sessions, browser, zenConnection,
     zenConnected, sending, checkingSessions, synthesizing, synthModel, setSynthModel,
     synthText, synthError, globalError, copiedKey, busy, refreshSessions,
-    openBrowser, focusModel, handleSubmit, retryModel, handleSynthesize,
+    openBrowser, focusModel, handleSubmit, retryModel, cancelModel, cancelBatch, canCancelBatch, handleSynthesize,
     copyText, clearPrompt, browserLabel, sessionHint, doneCount,
     SESSION_TONE, SESSION_LABELS, TASK_TONE, TASK_LABELS, IN_PROGRESS,
   } = useAggregatorController()
@@ -84,6 +84,8 @@ export function App() {
         onPromptChange={setPrompt}
         onSubmit={() => void handleSubmit()}
         onClear={clearPrompt}
+        canCancelBatch={canCancelBatch}
+        onCancelBatch={() => void cancelBatch()}
       />
 
       <section className="responses-grid" aria-label="Независимые ответы">
@@ -105,6 +107,8 @@ export function App() {
             onFocus={focusModel}
             onCopy={copyText}
             onRetry={retryModel}
+            onCancel={cancelModel}
+            canCancel={Boolean(results[model].taskId && IN_PROGRESS.includes(results[model].status))}
           />
         ))}
       </section>

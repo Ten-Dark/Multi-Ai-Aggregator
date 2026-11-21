@@ -43,7 +43,7 @@ function createExtensionHarness() {
   const statusWrites = []
   const browser = {
     runtime: {
-      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.2.1' }),
+      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.0' }),
       getURL: (path) => `moz-extension://test/${path}`,
       onMessage: {
         addListener: (listener) => { runtimeListener = listener },
@@ -109,7 +109,7 @@ test('Zen extension pairs, authenticates and forwards progress over the bridge',
   assert.deepEqual(socket.sent[0], {
     type: 'auth',
     token: 'integration-secret',
-    extensionVersion: '0.2.1',
+    extensionVersion: '0.3.0',
   })
 
   socket.emit('message', { data: JSON.stringify({ type: 'auth-ok' }) })

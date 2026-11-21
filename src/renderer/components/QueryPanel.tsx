@@ -5,6 +5,8 @@ interface QueryPanelProps {
   onPromptChange: (value: string) => void
   onSubmit: () => void
   onClear: () => void
+  canCancelBatch: boolean
+  onCancelBatch: () => void
 }
 
 export function QueryPanel({
@@ -14,6 +16,8 @@ export function QueryPanel({
   onPromptChange,
   onSubmit,
   onClear,
+  canCancelBatch,
+  onCancelBatch,
 }: QueryPanelProps) {
   return (
     <section className="panel query-panel">
@@ -47,6 +51,11 @@ export function QueryPanel({
           >
             {sending ? 'Отправляю всем…' : 'Отправить всем'}
           </button>
+          {canCancelBatch && (
+            <button className="button secondary" onClick={onCancelBatch}>
+              Отменить все
+            </button>
+          )}
         </div>
       </div>
     </section>

@@ -1,8 +1,9 @@
 # Cancellation Protocol
 
-Status: Stage 2 implemented; Extension integration is next
+Status: Stages 1–5 implemented; full regression and packaged verification remain
 Scope: Electron Renderer, Main Process, Zen WebSocket Bridge, Zen Extension  
 Compatibility: additive protocol revision; no change to authentication or extension-origin pinning
+Zen Extension version: 0.3.0 (required for task-correlated send responses and cancellation)
 
 ## 1. Goals and invariants
 
@@ -40,7 +41,8 @@ Main owns:
 Extension owns:
 - active automation controller per task ID;
 - mapping from task ID to target tab;
-- cancellation of in-flight DOM automation.
+- cancellation of in-flight DOM automation;
+- bounded recent-task history for duplicate, cancelled, and already-finished IDs.
 
 Renderer owns presentation only. It may request cancellation but must not mark a task cancelled before Main confirms the transition through a validated event/result.
 
@@ -133,12 +135,12 @@ On `send`:
 On `cancelTask`:
 1. Validate task ID.
 2. Find the active task.
-3. Abort its controller.
-4. Send `mai:cancel` to the matching content script with the same task ID.
-5. Await its acknowledgement (bounded).
-6. Return idempotent cancellation result.
+3. Send `mai:cancel` to the matching content script with the same task ID.
+4. Await its acknowledgement (bounded).
+5. Abort the background task signal and await task settlement (bounded).
+6. Return an idempotent cancellation result.
 
-Content script maintains one active run per task ID. Cancellation checks must be inserted at every asynchronous boundary and polling loop:
+Content script maintains `activeRuns`, a bounded finished-task history, and bounded cancellation-before-start tombstones. A cancel arriving before its matching send prevents that send from starting. Cancellation checks are inserted at asynchronous boundaries and polling loops:
 - wait for composer;
 - consent dismissal;
 - composer fill and send evidence;
@@ -189,7 +191,7 @@ On WebSocket disconnect, reject pending bridge commands as today and settle acti
 
 Add:
 - `TaskStatus: 'cancelling' | 'cancelled'`;
-- `TaskErrorCode: 'cancelled'` only if a compatibility reason field is insufficient (prefer cancellation reason separate from error);
+- `TaskErrorCode: 'cancelled'` for a cooperative cancellation returned by the Extension;
 - optional `taskId` and `batchId` on task events/results;
 - a typed cancellation event or model event carrying the new task status;
 - `cancelTask(taskId)` and `cancelBatch(batchId)` to AggregatorApi.
@@ -203,7 +205,7 @@ IPC handlers must use the existing trusted-sender assertion and strict ID valida
 ## 8. Renderer behavior
 
 - Read task and batch IDs from Main Process model events.
-- Keep active IDs in refs so cancellation works before React re-renders.
+- Use task and batch IDs from the latest model results when requesting cancellation; Main remains the lifecycle authority.
 - Show a Cancel button while a task/batch is active.
 - For a batch, show one Cancel all action and preserve per-model terminal results.
 - For a single model retry, show cancellation on that model only.
@@ -264,9 +266,9 @@ IPC handlers must use the existing trusted-sender assertion and strict ID valida
 
 1. Shared types, ID validation, protocol schema and deterministic unit tests. (Complete.)
 2. Main task registry, terminal arbitration, cancellation commands and IPC surface. (Complete.)
-3. Extension background task registry and cancellation routing. (Next.)
-4. Content-script AbortSignal support and cancellation checkpoints.
-5. Renderer controls, state presentation and stale-event protection.
+3. Extension background task registry and cancellation routing. (Complete.)
+4. Content-script AbortSignal support and cancellation checkpoints. (Complete.)
+5. Renderer controls, state presentation and stale-event protection. (Complete.)
 6. Full regression: typecheck, all security/integration tests, packaging, packaged smoke test.
 
 Each stage is committed separately with Conventional Commits. Do not push unless explicitly requested.

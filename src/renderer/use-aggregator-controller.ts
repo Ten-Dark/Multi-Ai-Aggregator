@@ -333,6 +333,44 @@ export function useAggregatorController() {
     }
   }
 
+  const cancelModel = useCallback(async (model: ModelId) => {
+    const result = results[model]
+    if (!result.taskId || !IN_PROGRESS.includes(result.status) || result.status === 'cancelling') return
+    setGlobalError('')
+    try {
+      const outcome = await window.aggregator.cancelTask(result.taskId)
+      if (!outcome.accepted && !['done', 'error', 'cancelled'].includes(outcome.status || '')) {
+        setGlobalError('Не удалось принять запрос на отмену задачи.')
+      }
+    } catch (error) {
+      setGlobalError(cleanError(error))
+    }
+  }, [results])
+
+  const cancelBatch = useCallback(async () => {
+    const activeTask = MODEL_IDS
+      .map((model) => results[model])
+      .find((result) => result.batchId && IN_PROGRESS.includes(result.status))
+    if (!activeTask?.batchId) return
+
+    const hasCancellableTasks = MODEL_IDS.some((model) => {
+      const result = results[model]
+      return result.batchId === activeTask.batchId &&
+        IN_PROGRESS.includes(result.status) && result.status !== 'cancelling'
+    })
+    if (!hasCancellableTasks) return
+
+    setGlobalError('')
+    try {
+      const outcome = await window.aggregator.cancelBatch(activeTask.batchId)
+      if (outcome.rejected > 0) {
+        setGlobalError(`Не удалось принять отмену для ${outcome.rejected} задач.`)
+      }
+    } catch (error) {
+      setGlobalError(cleanError(error))
+    }
+  }, [results])
+
   const handleSynthesize = async () => {
     if (busy || doneCount === 0 || !lastSubmittedPrompt || !operationGate.tryAcquire()) return
     setSynthesizing(true)
@@ -392,11 +430,16 @@ export function useAggregatorController() {
     ['login-required', 'manual-action', 'blocked'].includes(sessions[model].status),
   )
 
+  const canCancelBatch = MODEL_IDS.some((model) => {
+    const result = results[model]
+    return Boolean(result.batchId) && IN_PROGRESS.includes(result.status) && result.status !== 'cancelling'
+  })
+
   return {
     prompt, setPrompt, lastSubmittedPrompt, results, sessions, browser, zenConnection,
     zenConnected, sending, checkingSessions, synthesizing, synthModel, setSynthModel,
     synthText, synthError, globalError, copiedKey, busy, refreshSessions,
-    openBrowser, focusModel, handleSubmit, retryModel, handleSynthesize,
+    openBrowser, focusModel, handleSubmit, retryModel, cancelModel, cancelBatch, canCancelBatch, handleSynthesize,
     copyText, clearPrompt, browserLabel, sessionHint, doneCount,
     SESSION_TONE, SESSION_LABELS, TASK_TONE, TASK_LABELS, IN_PROGRESS,
   }

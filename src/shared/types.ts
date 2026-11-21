@@ -39,6 +39,7 @@ export type TaskStatus =
   | 'cancelled'
 
 export type TaskErrorCode =
+  | 'cancelled'
   | 'login'
   | 'manual'
   | 'blocked'

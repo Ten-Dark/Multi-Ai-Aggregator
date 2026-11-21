@@ -99,7 +99,7 @@ test('confirmed cancellation wins over a late model response', async (t) => {
     type: 'response',
     id: sendCommand.id,
     ok: true,
-    data: { text: 'late model response must be ignored' },
+    data: { taskId: sendCommand.payload.taskId, text: 'late model response must be ignored' },
   }))
 
   const result = await operation
@@ -187,7 +187,7 @@ test('batch cancellation preserves completed children and cancels only active ta
     type: 'response',
     id: completed.id,
     ok: true,
-    data: { text: 'completed before batch cancellation' },
+    data: { taskId: completed.payload.taskId, text: 'completed before batch cancellation' },
   }))
   await waitForCondition(() => events.some(
     (event) => event.type === 'model' &&
@@ -235,7 +235,7 @@ test('batch cancellation preserves completed children and cancels only active ta
       type: 'response',
       id: command.id,
       ok: true,
-      data: { text: 'late batch response must be ignored' },
+      data: { taskId: command.payload.taskId, text: 'late batch response must be ignored' },
     }))
   }
 

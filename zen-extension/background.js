@@ -18,6 +18,10 @@ let reconnectTimer = null
 let authenticated = false
 let lastAuthError = ''
 let currentStatus = { state: 'idle', message: 'Код подключения не задан.' }
+const activeTasks = new Map()
+const finishedTasks = new Map()
+const FINISHED_TASK_LIMIT = 256
+const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function setStatus(state, message) {
   currentStatus = { state, message, updatedAt: Date.now() }
@@ -306,19 +310,140 @@ async function executeAction(action, payload) {
   }
 
   if (action === 'send') {
-    const model = assertModel(payload?.model)
-    const prompt = validatePrompt(payload?.prompt)
-    const timeoutMs = clampTimeout(payload?.timeoutMs, 240_000)
-    const purpose = payload?.purpose === 'synthesis' ? 'synthesis' : 'answer'
-    const text = await runModelPrompt(model, prompt, timeoutMs, purpose)
-    return { text }
+    return runTask(payload)
+  }
+
+  if (action === 'cancelTask') {
+    return cancelTask(payload)
   }
 
   throw makeError('unknown', `Неизвестное действие: ${String(action)}`)
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw makeError('cancelled', 'Операция отменена.')
+}
+
+function delay(ms, signal) {
+  throwIfAborted(signal)
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(makeError('cancelled', 'Операция отменена.'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function rememberFinishedTask(taskId, status) {
+  finishedTasks.delete(taskId)
+  finishedTasks.set(taskId, status)
+  while (finishedTasks.size > FINISHED_TASK_LIMIT) {
+    finishedTasks.delete(finishedTasks.keys().next().value)
+  }
+}
+
+function runTask(payload) {
+  const taskId = payload?.taskId
+  if (typeof taskId !== 'string' || !TASK_ID_PATTERN.test(taskId)) {
+    throw makeError('unknown', 'Некорректный идентификатор задачи.')
+  }
+  if (activeTasks.has(taskId) || finishedTasks.has(taskId)) {
+    throw makeError('busy', 'Задача с таким идентификатором уже использовалась.')
+  }
+
+  const model = assertModel(payload?.model)
+  const prompt = validatePrompt(payload?.prompt)
+  const timeoutMs = clampTimeout(payload?.timeoutMs, 240_000)
+  const purpose = payload?.purpose === 'synthesis' ? 'synthesis' : 'answer'
+  const batchId = payload?.batchId
+  if (batchId !== undefined && (typeof batchId !== 'string' || !TASK_ID_PATTERN.test(batchId))) {
+    throw makeError('unknown', 'Некорректный идентификатор группы задач.')
+  }
+
+  const task = {
+    taskId,
+    batchId,
+    model,
+    controller: new AbortController(),
+    tabId: null,
+    cancelled: false,
+    completion: null,
+    cancelPromise: null,
+  }
+  activeTasks.set(taskId, task)
+  task.completion = (async () => {
+    try {
+      const text = await runModelPrompt(model, prompt, timeoutMs, purpose, task)
+      throwIfAborted(task.controller.signal)
+      return { taskId, text }
+    } finally {
+      if (activeTasks.get(taskId) === task) activeTasks.delete(taskId)
+      rememberFinishedTask(taskId, task.cancelled ? 'cancelled' : 'finished')
+    }
+  })()
+  return task.completion
+}
+
+async function cancelTask(payload) {
+  const taskId = payload?.taskId
+  if (typeof taskId !== 'string' || !TASK_ID_PATTERN.test(taskId)) {
+    throw makeError('unknown', 'Некорректный идентификатор задачи.')
+  }
+
+  const task = activeTasks.get(taskId)
+  if (!task) {
+    const finishedStatus = finishedTasks.get(taskId)
+    if (finishedStatus === 'cancelled') return { taskId, cancelled: true }
+    return finishedTasks.has(taskId)
+      ? { taskId, cancelled: false, reason: 'already-finished' }
+      : { taskId, cancelled: true }
+  }
+  if (task.cancelPromise) return task.cancelPromise
+
+  task.cancelPromise = (async () => {
+    try {
+      if (task.tabId !== null) {
+        let acknowledgement
+        try {
+          acknowledgement = await withTimeout(
+            browser.tabs.sendMessage(task.tabId, { type: 'mai:cancel', taskId }),
+            8_000,
+            'Страница не подтвердила отмену автоматизации.',
+          )
+        } catch {
+          throw makeError('browser', 'Страница не подтвердила отмену автоматизации.')
+        }
+        if (acknowledgement?.alreadyFinished === true || acknowledgement?.cancelled === false) {
+          throw makeError('busy', 'Задача уже завершилась до обработки отмены.')
+        }
+        if (!acknowledgement?.ok || acknowledgement.taskId !== taskId || acknowledgement.cancelled !== true) {
+          throw makeError('browser', 'Страница вернула некорректное подтверждение отмены.')
+        }
+      }
+
+      task.cancelled = true
+      task.controller.abort()
+      try {
+        await withTimeout(task.completion, 8_000, 'Автоматизация не завершилась после подтверждения отмены.')
+      } catch (error) {
+        if (error?.code !== 'cancelled') throw error
+      }
+      return { taskId, cancelled: true }
+    } catch (error) {
+      if (error?.code !== 'busy') {
+        task.cancelled = true
+        task.controller.abort()
+      }
+      throw error
+    }
+  })()
+  return task.cancelPromise
 }
 
 async function getTabsState() {
@@ -392,28 +517,30 @@ async function activateTab(tabId) {
   await browser.tabs.update(tabId, { active: true }).catch(() => {})
 }
 
-async function waitForTabLoaded(tabId, timeoutMs) {
+async function waitForTabLoaded(tabId, timeoutMs, signal) {
   const deadline = Date.now() + timeoutMs
-  await delay(300)
+  await delay(300, signal)
   while (Date.now() < deadline) {
+    throwIfAborted(signal)
     const tab = await browser.tabs.get(tabId).catch(() => null)
     if (!tab) throw makeError('browser', 'Вкладка Zen была закрыта.')
     if (tab.status === 'complete') return
-    await delay(300)
+    await delay(300, signal)
   }
   throw makeError('timeout', 'Страница сервиса не загрузилась за отведённое время.')
 }
 
-async function waitForContent(tabId, timeoutMs = 45_000) {
+async function waitForContent(tabId, timeoutMs = 45_000, signal) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    throwIfAborted(signal)
     try {
       const response = await browser.tabs.sendMessage(tabId, { type: 'mai:ping' })
       if (response?.ok) return
     } catch {
       // The content script is not ready yet.
     }
-    await delay(300)
+    await delay(300, signal)
   }
   throw makeError(
     'site',
@@ -423,15 +550,16 @@ async function waitForContent(tabId, timeoutMs = 45_000) {
 
 async function ensureModelTab(model, options = {}) {
   const state = await ensureTabs()
+  throwIfAborted(options.signal)
   const tabId = state.tabs[model]
   if (!tabId) throw makeError('browser', 'Не удалось создать вкладку сервиса.')
 
   if (options.navigate) {
     await browser.tabs.update(tabId, { url: ADAPTERS[model].url })
-    await waitForTabLoaded(tabId, 60_000)
+    await waitForTabLoaded(tabId, 60_000, options.signal)
   }
 
-  await waitForContent(tabId)
+  await waitForContent(tabId, 45_000, options.signal)
   return tabId
 }
 
@@ -488,28 +616,40 @@ async function inspectModelSession(model, tabId) {
   )
 }
 
-async function withTimeout(promise, timeoutMs, message) {
+async function withTimeout(promise, timeoutMs, message, signal) {
   let timer
+  let onAbort
   try {
     return await Promise.race([
       promise,
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(makeError('timeout', message)), timeoutMs)
       }),
+      new Promise((_, reject) => {
+        onAbort = () => reject(makeError('cancelled', 'Операция отменена.'))
+        signal?.addEventListener('abort', onAbort, { once: true })
+        if (signal?.aborted) onAbort()
+      }),
     ])
   } finally {
     if (timer) clearTimeout(timer)
+    if (onAbort) signal?.removeEventListener('abort', onAbort)
   }
 }
 
-async function runModelPrompt(model, prompt, timeoutMs, purpose) {
-  const tabId = await ensureModelTab(model, { navigate: true })
+async function runModelPrompt(model, prompt, timeoutMs, purpose, task) {
+  const signal = task.controller.signal
+  throwIfAborted(signal)
+  const tabId = await ensureModelTab(model, { navigate: true, signal })
+  throwIfAborted(signal)
+  task.tabId = tabId
   const label = ADAPTERS[model].label
   let response
   try {
     response = await withTimeout(
       browser.tabs.sendMessage(tabId, {
         type: 'mai:send',
+        taskId: task.taskId,
         model,
         prompt,
         timeoutMs,
@@ -517,8 +657,10 @@ async function runModelPrompt(model, prompt, timeoutMs, purpose) {
       }),
       timeoutMs + 15_000,
       `${label}: истекло время ожидания ответа.`,
+      signal,
     )
   } catch (error) {
+    if (signal.aborted) throw makeError('cancelled', 'Операция отменена.')
     if (error?.code) throw error
     throw makeError(
       'browser',
@@ -540,9 +682,15 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
   if (!message || typeof message.type !== 'string') return undefined
 
   if (message.type === 'mai:progress') {
-    if (authenticated && MODELS.includes(message.model)) {
+    const task = typeof message.taskId === 'string' ? activeTasks.get(message.taskId) : null
+    const validPhase = ['opening', 'sending', 'waiting'].includes(message.phase)
+    const validTaskProgress = !message.taskId || (
+      task && task.model === message.model && sender?.tab?.id === task.tabId
+    )
+    if (authenticated && MODELS.includes(message.model) && validPhase && validTaskProgress) {
       sendRaw({
         type: 'progress',
+        ...(message.taskId ? { taskId: message.taskId } : {}),
         model: message.model,
         phase: message.phase,
         purpose: message.purpose,

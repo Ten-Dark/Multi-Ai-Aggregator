@@ -6,7 +6,7 @@ const SESSION_STATUSES = new Set([
   'manual-action', 'blocked', 'error',
 ])
 const TASK_STATUSES = new Set(['idle', 'queued', 'opening', 'sending', 'waiting', 'cancelling', 'done', 'error', 'cancelled'])
-const ERROR_CODES = new Set(['login', 'manual', 'blocked', 'timeout', 'busy', 'browser', 'site', 'unknown'])
+const ERROR_CODES = new Set(['cancelled', 'login', 'manual', 'blocked', 'timeout', 'busy', 'browser', 'site', 'unknown'])
 const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function isTaskId(value) {

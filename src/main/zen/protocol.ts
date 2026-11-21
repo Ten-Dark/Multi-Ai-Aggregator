@@ -41,6 +41,7 @@ export type ZenClientMessage =
   | ZenResponseMessage
 
 const TASK_ERROR_CODES: TaskErrorCode[] = [
+  'cancelled',
   'login',
   'manual',
   'blocked',

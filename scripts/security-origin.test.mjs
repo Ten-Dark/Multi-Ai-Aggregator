@@ -213,12 +213,65 @@ test('accepts a valid command response from the extension', async (t) => {
     type: 'response',
     id: command.id,
     ok: true,
-    data: { text: 'test answer' },
+    data: { taskId: command.payload.taskId, text: 'test answer' },
   }))
 
   const answer = await sendPromise
   assert.equal(answer.status, 'done')
   assert.equal(answer.text, 'test answer')
+})
+
+test('synthesis commands carry a task identifier required by the extension protocol', async (t) => {
+  const { bridge, connection, token } = await createBridge(t, 'multi-ai-synthesis-task-id-test-')
+  const client = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(client.accepted, true)
+
+  const commandPromise = new Promise((resolve) => {
+    client.socket.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+  })
+  const synthesisPromise = bridge.synthesize({
+    model: 'chatgpt',
+    prompt: 'Synthesize the available answer.',
+    answers: [{ model: 'qwen', text: 'A source answer.' }],
+  })
+  const command = await commandPromise
+  assert.equal(command.action, 'send')
+  assert.equal(command.payload.purpose, 'synthesis')
+  assert.match(command.payload.taskId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  client.socket.send(JSON.stringify({
+    type: 'response',
+    id: command.id,
+    ok: true,
+    data: { taskId: command.payload.taskId, text: 'Synthesized answer.' },
+  }))
+
+  assert.deepEqual(await synthesisPromise, { model: 'chatgpt', text: 'Synthesized answer.' })
+})
+
+test('rejects a model response correlated to a different task identifier', async (t) => {
+  const { bridge, connection, token } = await createBridge(t, 'multi-ai-task-correlation-test-')
+  const client = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(client.accepted, true)
+
+  const commandPromise = new Promise((resolve) => {
+    client.socket.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+  })
+  const request = bridge.sendOne('qwen', 'correlation test')
+  const command = await commandPromise
+  client.socket.send(JSON.stringify({
+    type: 'response',
+    id: command.id,
+    ok: true,
+    data: {
+      taskId: '5a1b6e40-7a53-4c21-9e11-6e7c8b0f1234',
+      text: 'response belongs to another task',
+    },
+  }))
+
+  const result = await request
+  assert.equal(result.status, 'error')
+  assert.equal(result.errorCode, 'unknown')
+  assert.match(result.error, /идентификатором задачи/)
 })
 
 test('rejects malformed response payloads after authentication', async (t) => {
@@ -348,7 +401,7 @@ test('rejects overlapping operations without disturbing the active request', asy
     type: 'response',
     id: command.id,
     ok: true,
-    data: { text: 'first answer' },
+    data: { taskId: command.payload.taskId, text: 'first answer' },
   }))
   const result = await activeRequest
   assert.equal(result.status, 'done')

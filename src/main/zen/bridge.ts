@@ -767,6 +767,9 @@ export class ZenBridge {
         },
         RESPONSE_TIMEOUT_MS + COMMAND_GRACE_MS,
       )
+      if (!data || typeof data !== 'object' || (data as Record<string, unknown>).taskId !== taskId) {
+        throw new BridgeError('unknown', `${MODEL_LABELS[model]}: ответ расширения не совпадает с идентификатором задачи.`)
+      }
       const text =
         data && typeof data === 'object' && typeof (data as Record<string, unknown>).text === 'string'
           ? ((data as Record<string, unknown>).text as string).trim()
@@ -858,9 +861,11 @@ export class ZenBridge {
     this.running.add(request.model)
     try {
       const synthesisPrompt = buildSynthesisPrompt(request.prompt, answers)
+      const taskId = randomUUID()
       const data = await this.sendCommand(
         'send',
         {
+          taskId,
           model: request.model,
           prompt: synthesisPrompt,
           timeoutMs: SYNTHESIS_TIMEOUT_MS,
@@ -868,6 +873,9 @@ export class ZenBridge {
         },
         SYNTHESIS_TIMEOUT_MS + COMMAND_GRACE_MS,
       )
+      if (!data || typeof data !== 'object' || (data as Record<string, unknown>).taskId !== taskId) {
+        throw new BridgeError('unknown', `${MODEL_LABELS[request.model]}: ответ синтеза не совпадает с идентификатором задачи.`)
+      }
       const text =
         data && typeof data === 'object' && typeof (data as Record<string, unknown>).text === 'string'
           ? ((data as Record<string, unknown>).text as string).trim()

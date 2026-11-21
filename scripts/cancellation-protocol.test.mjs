@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import test from 'node:test'
 
 const require = createRequire(import.meta.url)
-const { isTaskId, isZenProgressMessage } = require('../dist-electron/main/zen/protocol.js')
+const { isTaskId, isZenProgressMessage, isZenResponseMessage } = require('../dist-electron/main/zen/protocol.js')
 
 const validTaskId = '2f1a6e40-7a53-4c21-9e11-6e7c8b0f1234'
 
@@ -50,4 +50,13 @@ test('rejects progress messages with malformed task identifiers', () => {
     model: 'deepseek',
     phase: 'opening',
   }), false)
+})
+
+test('accepts the cancelled error code returned by cooperative extension cancellation', () => {
+  assert.equal(isZenResponseMessage({
+    type: 'response',
+    id: 'cancelled-task-response',
+    ok: false,
+    error: { code: 'cancelled', message: 'Operation cancelled.' },
+  }), true)
 })

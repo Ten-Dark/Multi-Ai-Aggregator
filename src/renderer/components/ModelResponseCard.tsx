@@ -23,6 +23,8 @@ interface ModelResponseCardProps {
   onFocus: (model: ModelId) => void
   onCopy: (key: string, text: string) => void
   onRetry: (model: ModelId) => void
+  onCancel: (model: ModelId) => void
+  canCancel: boolean
 }
 
 export function ModelResponseCard({
@@ -41,6 +43,8 @@ export function ModelResponseCard({
   onFocus,
   onCopy,
   onRetry,
+  onCancel,
+  canCancel,
 }: ModelResponseCardProps) {
   const isWorking = inProgress.includes(result.status)
 
@@ -68,11 +72,13 @@ export function ModelResponseCard({
       <div className="response-body" aria-busy={isWorking}>
         {result.text ? (
           <>
-            {result.status === 'error' && result.partial && (
+            {(result.status === 'error' && result.partial) || result.status === 'cancelled' ? (
               <p className="partial-note">Неполный ответ — запрос не был завершён.</p>
-            )}
+            ) : null}
             <pre className="response-text">{result.text}</pre>
           </>
+        ) : result.status === 'cancelled' ? (
+          <p className="empty-text">{result.error || 'Запрос отменён.'}</p>
         ) : result.error ? (
           <p className="empty-text error-text">{result.error}</p>
         ) : isWorking ? (
@@ -92,7 +98,7 @@ export function ModelResponseCard({
         )}
       </div>
 
-      {result.error && result.text && (
+      {result.status === 'error' && result.error && result.text && (
         <div className="inline-error">{result.error}</div>
       )}
 
@@ -116,6 +122,13 @@ export function ModelResponseCard({
         >
           Повторить
         </button>
+        {result.status === 'cancelling' ? (
+          <button className="button small secondary" disabled>Отменяю…</button>
+        ) : canCancel ? (
+          <button className="button small secondary" onClick={() => onCancel(model)}>
+            Отменить
+          </button>
+        ) : null}
       </div>
     </article>
   )
