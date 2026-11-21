@@ -132,6 +132,11 @@ On `send`:
 4. Pass task ID to the content script.
 5. Remove the task from the map in `finally`.
 
+On WebSocket disconnect:
+- send `mai:cancel` to each active task's tab when available;
+- abort each background controller so local orchestration settles;
+- treat the disconnect as an unconfirmed remote stop, not proof that the AI service stopped generating.
+
 On `cancelTask`:
 1. Validate task ID.
 2. Find the active task.

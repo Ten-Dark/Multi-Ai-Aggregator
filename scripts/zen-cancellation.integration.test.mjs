@@ -44,6 +44,7 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
   const values = new Map()
   let runtimeListener
   let pendingSend = null
+  let cancelMessages = 0
   const tabById = new Map([
     [101, { id: 101, windowId: 1, status: 'complete', url: 'https://chat.qwen.ai/' }],
   ])
@@ -83,6 +84,7 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
           return new Promise((resolve) => { pendingSend = { resolve, tabId, message } })
         }
         if (message.type === 'mai:cancel') {
+          cancelMessages += 1
           pendingSend?.resolve({
             ok: false,
             taskId: message.taskId,
@@ -121,6 +123,7 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
   return {
     values,
     get pendingSend() { return pendingSend },
+    get cancelMessages() { return cancelMessages },
     dispatch: (message, sender = {}) => runtimeListener(message, sender),
   }
 }
@@ -205,6 +208,25 @@ test('background routes cancellation to the matching tab and waits for automatio
   const duplicate = await waitForResponse(socket, 'send-duplicate')
   assert.equal(duplicate.ok, false)
   assert.equal(duplicate.error.code, 'busy')
+})
+
+test('background disconnect aborts active content automation', async () => {
+  MockWebSocket.instances = []
+  const harness = createBackgroundHarness()
+  const socket = await connectBackground(harness)
+
+  command(socket, 'send-disconnect', 'send', {
+    taskId: TASK_ID,
+    model: 'qwen',
+    prompt: 'disconnect test',
+    timeoutMs: 30_000,
+    purpose: 'answer',
+  })
+  await waitFor(() => Boolean(harness.pendingSend))
+
+  socket.close(1008, 'Replaced')
+  await waitFor(() => harness.cancelMessages === 1)
+  assert.equal(harness.cancelMessages, 1)
 })
 
 test('background does not report cancellation when the content task already finished', async () => {

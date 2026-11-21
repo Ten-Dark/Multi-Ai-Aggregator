@@ -163,6 +163,7 @@ async function connect() {
   nextSocket.addEventListener('close', (event) => {
     if (socket !== nextSocket) return
     authenticated = false
+    abortActiveTasksOnDisconnect()
     if (socketAuthTimer) {
       clearTimeout(socketAuthTimer)
       socketAuthTimer = null
@@ -188,6 +189,26 @@ async function connect() {
   nextSocket.addEventListener('error', () => {
     // The close handler reports the state and schedules a retry.
   })
+}
+
+function abortActiveTasksOnDisconnect() {
+  for (const task of activeTasks.values()) {
+    task.cancelled = true
+    if (task.tabId !== null) {
+      try {
+        const cancellation = browser.tabs.sendMessage(task.tabId, {
+          type: 'mai:cancel',
+          taskId: task.taskId,
+        })
+        if (cancellation && typeof cancellation.catch === 'function') {
+          void cancellation.catch(() => {})
+        }
+      } catch {
+        // The tab may already be closed; local orchestration is still aborted below.
+      }
+    }
+    task.controller.abort()
+  }
 }
 
 function scheduleReconnect() {
