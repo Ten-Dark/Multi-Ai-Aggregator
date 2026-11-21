@@ -312,11 +312,37 @@ async function executeAction(action, payload) {
   }
 
   if (action === 'checkSessions') {
-    const state = await ensureTabs()
+    const state = await getTabsState()
+    if (!state) {
+      return MODELS.map((model) => ({
+        model,
+        status: 'unknown',
+        message: 'Вкладки сервисов ещё не созданы. Нажмите «Открыть вкладки в Zen».',
+      }))
+    }
+
+    const windowInfo = await browser.windows.get(state.windowId).catch(() => null)
+    if (!windowInfo) {
+      return MODELS.map((model) => ({
+        model,
+        status: 'unknown',
+        message: 'Окно сервисов не найдено. Нажмите «Открыть вкладки в Zen».',
+      }))
+    }
+
     const sessions = await Promise.all(
       MODELS.map(async (model) => {
         try {
-          const info = await inspectModelSession(model, state.tabs[model])
+          const tabId = state.tabs?.[model]
+          const tab = tabId ? await browser.tabs.get(tabId).catch(() => null) : null
+          if (!tab || tab.windowId !== state.windowId) {
+            return {
+              model,
+              status: 'unknown',
+              message: 'Вкладка сервиса не найдена. Нажмите «Открыть вкладки в Zen».',
+            }
+          }
+          const info = await inspectModelSession(model, tabId)
           return { model, ...info }
         } catch (error) {
           return {
@@ -497,36 +523,28 @@ async function ensureTabs() {
 }
 
 async function doEnsureTabs() {
-  let state = await getTabsState()
-  let windowInfo = null
-  if (state?.windowId) {
-    windowInfo = await browser.windows.get(state.windowId).catch(() => null)
+  const state = await getTabsState()
+  if (state?.windowId && state.tabs) {
+    const windowInfo = await browser.windows.get(state.windowId).catch(() => null)
+    if (windowInfo) {
+      const existingTabs = await Promise.all(
+        MODELS.map(async (model) => {
+          const tabId = state.tabs[model]
+          const tab = tabId ? await browser.tabs.get(tabId).catch(() => null) : null
+          return tab && tab.windowId === state.windowId ? tab : null
+        }),
+      )
+      if (existingTabs.every(Boolean)) return state
+    }
   }
 
-  if (!windowInfo) {
-    const created = await browser.windows.create({ focused: false })
-    const createdTabs = await browser.tabs.query({ windowId: created.id })
-    state = { windowId: created.id, tabs: {} }
-    for (const model of MODELS) {
-      state.tabs[model] = await createTab(state.windowId, model)
-    }
-    for (const tab of createdTabs) {
-      await browser.tabs.remove(tab.id).catch(() => {})
-    }
-    await saveTabsState(state)
-    return state
-  }
-
-  if (!state.tabs) state.tabs = {}
+  const created = await browser.windows.create({ focused: false })
+  const nextState = { windowId: created.id, tabs: {} }
   for (const model of MODELS) {
-    const tabId = state.tabs[model]
-    const tab = tabId ? await browser.tabs.get(tabId).catch(() => null) : null
-    if (!tab || tab.windowId !== state.windowId) {
-      state.tabs[model] = await createTab(state.windowId, model)
-    }
+    nextState.tabs[model] = await createTab(nextState.windowId, model)
   }
-  await saveTabsState(state)
-  return state
+  await saveTabsState(nextState)
+  return nextState
 }
 
 async function focusWindow(windowId) {

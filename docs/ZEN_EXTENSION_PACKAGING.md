@@ -29,3 +29,11 @@ The application now rotates the legacy bridge token into its protected `userData
 - The packaging script verifies archive contents and manifest version consistency.
 - A successful XPI build does not prove that the extension connects to the app or that provider automation works.
 - Do not automate changes to the user's normal Zen profile. Real-provider E2E must be performed only after the user installs the XPI and completes pairing.
+
+## Browser tab safety
+
+- Session inspection on application startup is read-only: it checks only previously registered service tabs and does not create windows or tabs.
+- Managed service windows and tabs are created only after an explicit user action (`Open tabs in Zen`) or when the user submits a request that requires them.
+- The extension must never call `browser.tabs.remove()` or `browser.windows.remove()`. It must not close, replace, reorganize, or unpin tabs belonging to the user's normal Zen workspace.
+- The managed service window may contain its own blank initial tab in addition to the three provider tabs. This is intentional; preserving user data takes priority over removing an extra blank tab.
+- Regression coverage asserts that destructive tab/window removal APIs are absent and that session checks do not call the tab-creation path.

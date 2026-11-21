@@ -90,6 +90,14 @@ function createExtensionHarness() {
   }
 }
 
+test('Zen extension never removes browser tabs and does not create tabs during session checks', () => {
+  const source = readFileSync(new URL('../zen-extension/background.js', import.meta.url), 'utf8')
+  assert.equal(source.includes('browser.tabs.remove('), false)
+  assert.equal(source.includes('browser.windows.remove('), false)
+  const sessionCheck = source.split("if (action === 'checkSessions') {")[1]?.split("if (action === 'send') {")[0] || ''
+  assert.ok(sessionCheck.includes('getTabsState()'))
+  assert.equal(sessionCheck.includes('ensureTabs()'), false)
+})
 test('Zen extension pairs, authenticates and forwards progress over the bridge', async () => {
   MockWebSocket.instances = []
   const harness = createExtensionHarness()
