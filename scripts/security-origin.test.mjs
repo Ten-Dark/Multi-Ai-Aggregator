@@ -196,6 +196,53 @@ test('rejects unsupported message types after authentication', async (t) => {
   assert.equal(closeCode, 1008)
 })
 
+test('accepts a valid command response from the extension', async (t) => {
+  const { bridge, connection, token } = await createBridge(t, 'multi-ai-valid-response-test-')
+  const result = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(result.accepted, true)
+
+  const commandPromise = new Promise((resolve) => {
+    result.socket.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+  })
+  const sendPromise = bridge.sendOne('chatgpt', 'test prompt')
+  const command = await commandPromise
+  assert.equal(command.type, 'command')
+  assert.equal(command.action, 'send')
+  assert.equal(command.payload.model, 'chatgpt')
+  result.socket.send(JSON.stringify({
+    type: 'response',
+    id: command.id,
+    ok: true,
+    data: { text: 'test answer' },
+  }))
+
+  const answer = await sendPromise
+  assert.equal(answer.status, 'done')
+  assert.equal(answer.text, 'test answer')
+})
+
+test('rejects malformed response payloads after authentication', async (t) => {
+  const { connection, token } = await createBridge(t, 'multi-ai-response-shape-test-')
+  const result = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(result.accepted, true)
+
+  const closeCode = await waitForClose(result.socket, () => {
+    result.socket.send(JSON.stringify({ type: 'response', id: 42, ok: true, data: { text: 'invalid' } }))
+  })
+  assert.equal(closeCode, 1007)
+})
+
+test('rejects malformed progress payloads after authentication', async (t) => {
+  const { connection, token } = await createBridge(t, 'multi-ai-progress-shape-test-')
+  const result = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(result.accepted, true)
+
+  const closeCode = await waitForClose(result.socket, () => {
+    result.socket.send(JSON.stringify({ type: 'progress', model: 'unknown-model', phase: 'sending' }))
+  })
+  assert.equal(closeCode, 1007)
+})
+
 test('revokes a replaced WebSocket before its asynchronous close event', async (t) => {
   const { connection, token } = await createBridge(t, 'multi-ai-replacement-test-')
   const first = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)

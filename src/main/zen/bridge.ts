@@ -18,6 +18,13 @@ import {
 } from '../../shared/types.js'
 import { buildSynthesisPrompt } from '../synthesis/prompt.js'
 import { isAllowedZenExtensionOrigin, isValidZenExtensionOrigin } from './origin.js'
+import {
+  isZenAuthMessage,
+  isZenProgressMessage,
+  isZenResponseMessage,
+  type ZenProgressMessage,
+  type ZenResponseMessage,
+} from './protocol.js'
 
 const DEFAULT_PORT = 45123
 const PORT_ATTEMPTS = 12
@@ -27,20 +34,7 @@ const CHECK_SESSIONS_TIMEOUT_MS = 90_000
 const RESPONSE_TIMEOUT_MS = 240_000
 const SYNTHESIS_TIMEOUT_MS = 300_000
 const COMMAND_GRACE_MS = 30_000
-const VALID_ERROR_CODES: TaskErrorCode[] = [
-  'login',
-  'manual',
-  'blocked',
-  'timeout',
-  'busy',
-  'browser',
-  'site',
-  'unknown',
-]
-const VALID_PROGRESS_PHASES = ['opening', 'sending', 'waiting'] as const
-
 type EmitFn = (event: AggregatorEvent) => void
-type ProgressPhase = (typeof VALID_PROGRESS_PHASES)[number]
 
 interface PendingCommand {
   resolve: (data: unknown) => void
@@ -58,14 +52,6 @@ class BridgeError extends Error {
     this.code = code
     this.partial = partial
   }
-}
-
-function isTaskErrorCode(value: unknown): value is TaskErrorCode {
-  return typeof value === 'string' && VALID_ERROR_CODES.includes(value as TaskErrorCode)
-}
-
-function isProgressPhase(value: unknown): value is ProgressPhase {
-  return typeof value === 'string' && VALID_PROGRESS_PHASES.includes(value as ProgressPhase)
 }
 
 function parseMessage(raw: RawData): Record<string, unknown> | null {
@@ -317,7 +303,11 @@ export class ZenBridge {
           socket.close(1008, 'Authentication required')
           return
         }
-        const received = typeof message.token === 'string' ? message.token : ''
+        if (!isZenAuthMessage(message)) {
+          socket.close(1007, 'Invalid authentication payload')
+          return
+        }
+        const received = message.token
         if (!tokensEqual(this.token, received)) {
           socket.send(JSON.stringify({ type: 'auth-error', message: 'Неверный код подключения.' }))
           socket.close(1008, 'Invalid token')
@@ -348,10 +338,18 @@ export class ZenBridge {
       }
       if (message.type === 'pong') return
       if (message.type === 'progress') {
+        if (!isZenProgressMessage(message)) {
+          socket.close(1007, 'Invalid progress payload')
+          return
+        }
         this.handleProgress(message)
         return
       }
       if (message.type === 'response') {
+        if (!isZenResponseMessage(message)) {
+          socket.close(1007, 'Invalid response payload')
+          return
+        }
         this.handleResponse(message)
         return
       }
@@ -408,39 +406,29 @@ export class ZenBridge {
     }, 3500)
   }
 
-  private handleProgress(message: Record<string, unknown>): void {
+  private handleProgress(message: ZenProgressMessage): void {
     if (this.synthesisActive) return
-    const rawModel = message.model
-    if (!MODEL_IDS.includes(rawModel as ModelId)) return
-    const model = rawModel as ModelId
+    const { model, phase } = message
     if (!this.progressModels.has(model)) return
-    if (!isProgressPhase(message.phase)) return
     this.emit({
       type: 'model',
       result: { model, status: message.phase, updatedAt: Date.now() },
     })
   }
 
-  private handleResponse(message: Record<string, unknown>): void {
-    const id = typeof message.id === 'string' ? message.id : ''
-    const pending = this.pending.get(id)
+  private handleResponse(message: ZenResponseMessage): void {
+    const pending = this.pending.get(message.id)
     if (!pending) return
-    this.pending.delete(id)
+    this.pending.delete(message.id)
     clearTimeout(pending.timer)
 
-    if (message.ok === true) {
+    if (message.ok) {
       pending.resolve(message.data)
       return
     }
 
-    const error =
-      message.error && typeof message.error === 'object'
-        ? (message.error as Record<string, unknown>)
-        : {}
-    const code = isTaskErrorCode(error.code) ? error.code : 'unknown'
-    const text = typeof error.message === 'string' ? error.message : 'Расширение вернуло ошибку.'
-    const partial = typeof error.partial === 'string' ? error.partial : undefined
-    pending.reject(new BridgeError(code, text, partial))
+    const { error } = message
+    pending.reject(new BridgeError(error.code ?? 'unknown', error.message, error.partial))
   }
 
   private sendCommand(action: string, payload: unknown, timeoutMs: number): Promise<unknown> {
