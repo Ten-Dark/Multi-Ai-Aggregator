@@ -143,3 +143,52 @@ test('registry selects a matching provider and reports unsupported platforms exp
   assert.equal(unsupported.platform, 'darwin')
   assert.equal(calls, 1)
 })
+
+test('identifies renamed browser executables from executable version metadata', () => {
+  const result = parseWindowsBrowserProcesses({
+    ProcessId: 501,
+    ParentProcessId: 1,
+    Name: 'browser-shell.exe',
+    ExecutablePath: 'D:\\Portable\\browser-shell.exe',
+    CommandLine: 'browser-shell.exe --profile-directory=Default',
+    FileDescription: 'Zen Browser',
+    ProductName: 'Zen Browser',
+    CompanyName: 'Zen-Team',
+    HasVisibleWindow: true,
+  })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].family, 'firefox')
+  assert.equal(result[0].product, 'Zen Browser')
+})
+
+test('identifies Chromium browsers from product metadata without known executable names', () => {
+  const result = parseWindowsBrowserProcesses({
+    ProcessId: 502,
+    ParentProcessId: 1,
+    Name: 'app.exe',
+    ProductName: 'Google Chrome',
+    FileDescription: 'Google Chrome',
+    CompanyName: 'Google LLC',
+    HasVisibleWindow: true,
+  })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].family, 'chromium')
+  assert.equal(result[0].product, 'Google Chrome')
+})
+
+test('does not classify unrelated Electron apps from generic browser-like metadata', () => {
+  const result = parseWindowsBrowserProcesses({
+    ProcessId: 503,
+    ParentProcessId: 1,
+    Name: 'dashboard.exe',
+    CommandLine: 'dashboard.exe --user-data-dir="D:\\Profiles\\Dashboard"',
+    ProductName: 'Acme Desktop',
+    FileDescription: 'Electron application browser dashboard',
+    CompanyName: 'Acme Corporation',
+    HasVisibleWindow: true,
+  })
+
+  assert.equal(result.length, 0)
+})

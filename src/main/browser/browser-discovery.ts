@@ -11,7 +11,7 @@ const POWERSHELL_DISCOVERY_SCRIPT = [
   "$known = '^(zen|firefox|librewolf|floorp|waterfox|chrome|msedge|brave|vivaldi|opera|chromium|thorium|arc|sidekick)\\.exe$'",
   "$profileArgs = '(?i)(-profile\\s|--profile\\s|--user-data-dir(?:=|\\s)|--profile-directory(?:=|\\s)|\\s-P\\s)'",
   "$windows = @{}; Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { $windows[[int]$_.Id] = $_.MainWindowTitle }",
-  "$processes = Get-CimInstance Win32_Process | Where-Object { $_.Name -match $known -or ($_.Name -match '(?i)\\.exe$' -and $_.CommandLine -match $profileArgs) } | ForEach-Object { $windowTitle = $windows[[int]$_.ProcessId]; [PSCustomObject]@{ ProcessId=$_.ProcessId; ParentProcessId=$_.ParentProcessId; Name=$_.Name; ExecutablePath=$_.ExecutablePath; CommandLine=$_.CommandLine; CreationDate=$_.CreationDate; WindowTitle=$windowTitle; HasVisibleWindow=[bool]$windowTitle } }",
+  "$processes = Get-CimInstance Win32_Process | Where-Object { $_.Name -match $known -or ($_.ExecutablePath -and ($windows.ContainsKey([int]$_.ProcessId) -or $_.CommandLine -match $profileArgs)) } | ForEach-Object { $windowTitle = $windows[[int]$_.ProcessId]; $version = $null; if ($_.ExecutablePath) { try { $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($_.ExecutablePath) } catch {} }; [PSCustomObject]@{ ProcessId=$_.ProcessId; ParentProcessId=$_.ParentProcessId; Name=$_.Name; ExecutablePath=$_.ExecutablePath; CommandLine=$_.CommandLine; CreationDate=$_.CreationDate; WindowTitle=$windowTitle; HasVisibleWindow=[bool]$windowTitle; FileDescription=if ($version) { $version.FileDescription } else { $null }; ProductName=if ($version) { $version.ProductName } else { $null }; CompanyName=if ($version) { $version.CompanyName } else { $null } } }",
   '$processes | ConvertTo-Json -Compress',
 ].join('; ')
 
@@ -48,6 +48,9 @@ interface RawWindowsProcess {
   CreationDate?: string | null
   WindowTitle?: string | null
   HasVisibleWindow?: boolean
+  FileDescription?: string | null
+  ProductName?: string | null
+  CompanyName?: string | null
 }
 
 const FIREFOX_PRODUCTS: Record<string, string> = {
@@ -114,14 +117,46 @@ function readFlagValue(args: string[], names: string[]): string | undefined {
   return undefined
 }
 
-function classifyBrowser(executableName: string, args: string[]): { family: BrowserFamily; product: string } | null {
+function classifyBrowser(
+  executableName: string,
+  args: string[],
+  metadata: Pick<RawWindowsProcess, 'FileDescription' | 'ProductName' | 'CompanyName'> = {},
+): { family: BrowserFamily; product: string } | null {
   const name = executableName.toLowerCase()
   if (FIREFOX_PRODUCTS[name]) return { family: 'firefox', product: FIREFOX_PRODUCTS[name] }
   if (CHROMIUM_PRODUCTS[name]) return { family: 'chromium', product: CHROMIUM_PRODUCTS[name] }
+
+  const productName = metadata.ProductName?.trim() || ''
+  const description = metadata.FileDescription?.trim() || ''
+  const company = metadata.CompanyName?.trim() || ''
+  const identity = [productName, description].filter(Boolean).join(' ')
+
+  const companyLower = company.toLowerCase()
+
+  if (/zen browser|librewolf|floorp|waterfox|mozilla firefox|firefox/i.test(identity)) {
+    const product = /zen browser/i.test(identity) ? 'Zen Browser'
+      : /librewolf/i.test(identity) ? 'LibreWolf'
+        : /floorp/i.test(identity) ? 'Floorp'
+          : /waterfox/i.test(identity) ? 'Waterfox' : 'Firefox'
+    return { family: 'firefox', product }
+  }
+
+  if (/google chrome|microsoft edge|brave|vivaldi|\bopera\b|chromium|thorium|arc browser|sidekick/i.test(identity)) {
+    const product = /google chrome/i.test(identity) ? 'Google Chrome'
+      : /microsoft edge/i.test(identity) ? 'Microsoft Edge'
+        : /brave/i.test(identity) ? 'Brave'
+          : /vivaldi/i.test(identity) ? 'Vivaldi'
+            : /thorium/i.test(identity) ? 'Thorium'
+              : /arc browser/i.test(identity) ? 'Arc'
+                : /sidekick/i.test(identity) ? 'Sidekick'
+                  : /\bopera\b/i.test(identity) ? 'Opera' : 'Chromium'
+    return { family: 'chromium', product }
+  }
   const hasProfileFlag = args.some((arg) => /^(--user-data-dir=|--profile-directory=|-profile$|--profile$)/i.test(arg))
   const hasFirefoxProfileFlag = args.some((arg) => arg.toLowerCase() === '-profile')
-  if (!name.endsWith('.exe') || !hasProfileFlag || (!name.includes('browser') && !hasFirefoxProfileFlag)) return null
-  return { family: 'unknown', product: path.basename(executableName, '.exe') }
+  const browserLikeCompany = /mozilla|zen|brave|vivaldi|opera|google|microsoft|arc browser/i.test(companyLower)
+  if (!name.endsWith('.exe') || !hasProfileFlag || (!name.includes('browser') && !hasFirefoxProfileFlag && !browserLikeCompany)) return null
+  return { family: 'unknown', product: productName || description || path.basename(executableName, '.exe') }
 }
 
 export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDescriptor[] {
@@ -135,7 +170,7 @@ export function parseWindowsBrowserProcesses(input: unknown): BrowserProcessDesc
     if (typeof row.Name !== 'string' || !row.Name.trim()) continue
     const commandLine = typeof row.CommandLine === 'string' ? row.CommandLine : ''
     const args = commandLine ? tokenizeWindowsCommandLine(commandLine) : []
-    const classification = classifyBrowser(row.Name, args)
+    const classification = classifyBrowser(row.Name, args, row)
     if (!classification) continue
     const firefoxProfile = classification.family === 'firefox' ? readFlagValue(args, ['-profile', '--profile']) : undefined
     const chromiumUserData = classification.family === 'chromium' ? readFlagValue(args, ['--user-data-dir']) : undefined
