@@ -160,8 +160,9 @@ test('can restart the bridge after a clean shutdown', async (t) => {
   const { bridge, connection } = await createBridge(t, 'multi-ai-restart-test-')
   await bridge.close()
 
-  const restarted = await bridge.start()
+  const [restarted, concurrentStart] = await Promise.all([bridge.start(), bridge.start()])
   assert.equal(restarted.status, 'starting')
+  assert.equal(concurrentStart.status, 'starting')
   assert.equal(bridge.getZenConnection().wsUrl, connection.wsUrl)
   assert.equal(bridge.getBrowserInfo().status, 'starting')
 })

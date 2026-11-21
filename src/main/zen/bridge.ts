@@ -97,6 +97,7 @@ export class ZenBridge {
   private extensionVersion: string | undefined
   private port = 0
   private started = false
+  private startPromise: Promise<BrowserInfo> | null = null
   private info: BrowserInfo = { status: 'stopped', browserName: 'Zen Browser' }
   private running = new Set<ModelId>()
   private progressModels = new Set<ModelId>()
@@ -186,6 +187,18 @@ export class ZenBridge {
 
   async start(): Promise<BrowserInfo> {
     if (this.started) return this.getBrowserInfo()
+    if (this.startPromise) return this.startPromise
+
+    const startPromise = this.startInternal()
+    this.startPromise = startPromise
+    try {
+      return await startPromise
+    } finally {
+      if (this.startPromise === startPromise) this.startPromise = null
+    }
+  }
+
+  private async startInternal(): Promise<BrowserInfo> {
     this.setInfo({
       status: 'starting',
       browserName: 'Zen Browser',
@@ -693,6 +706,7 @@ export class ZenBridge {
   }
 
   async close(): Promise<void> {
+    if (this.startPromise) await this.startPromise.catch(() => undefined)
     if (this.heartbeat) {
       clearInterval(this.heartbeat)
       this.heartbeat = null
