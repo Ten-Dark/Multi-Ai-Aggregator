@@ -26,6 +26,7 @@
         'button[type="submit"]',
       ],
       assistantSelectors: ['li[data-message-role="assistant"]', '[data-message-author-role="assistant"]'],
+      userSelectors: ['[data-message-author-role="user"]', 'li[data-message-role="user"]'],
       contentSelectors: ['[data-assistant-markdown]', '.markdown.prose', '.markdown'],
       stopSelectors: [
         'button[aria-label*="Перестать" i]',
@@ -38,6 +39,7 @@
       completion: 'attribute',
       completeAttribute: 'data-message-complete',
       stableMs: 2500,
+      noProgressMs: 45_000,
       guestAllowed: true,
     },
     qwen: {
@@ -58,6 +60,7 @@
         'button[aria-label*="Send" i]',
       ],
       assistantSelectors: ['.response-message-content.phase-answer', '.response-message-content', '.custom-qwen-markdown', '.qwen-markdown'],
+      userSelectors: ['.user-message-content', '.qwen-chat-message .user-message-content', '[class*="user-message"]'],
       contentSelectors: ['.custom-qwen-markdown', '.qwen-markdown'],
       stopSelectors: ['button.stop-button', '.stop-button', '[class*="stop-button"]', 'button[aria-label*="Stop" i]'],
       loggedOutSelectors: ['button.header-right-auth-button'],
@@ -65,6 +68,7 @@
       loginFormSelectors: ['input[type="password"]'],
       completion: 'stable',
       stableMs: 2800,
+      noProgressMs: 35_000,
       guestAllowed: true,
     },
     deepseek: {
@@ -94,6 +98,7 @@
         '.ds-message .ds-markdown',
         '.ds-markdown:not(.ds-think-content .ds-markdown)',
       ],
+      userSelectors: ['[data-message-author-role="user"]', '.user-message', 'div.fbb737a4'],
       contentSelectors: [],
       stopSelectors: [
         'button[aria-label*="Stop" i]',
@@ -107,6 +112,7 @@
       loginFormSelectors: ['input[type="password"]'],
       completion: 'stable',
       stableMs: 3500,
+      noProgressMs: 45_000,
       guestAllowed: false,
     },
   }
@@ -388,6 +394,22 @@
     nodes = nodes.filter((element) => !nodes.some((other) => other !== element && other.contains(element)))
     const last = nodes[nodes.length - 1]
 
+    let userNodes = []
+    for (const selector of adapter.userSelectors) {
+      try {
+        userNodes = Array.from(document.querySelectorAll(selector)).filter(isVisible)
+      } catch {
+        // Ignore selectors that a provider no longer supports.
+      }
+      if (userNodes.length > 0) break
+    }
+    const lastUser = userNodes[userNodes.length - 1]
+    const lastUserText = lastUser ? String(lastUser.innerText || lastUser.textContent || '') : ''
+    const assistantAfterLastUser = Boolean(
+      lastUser && last && typeof lastUser.compareDocumentPosition === 'function' &&
+      (lastUser.compareDocumentPosition(last) & 4),
+    )
+
     let text = ''
     if (last) {
       let content = last
@@ -425,6 +447,8 @@
       url: location.href,
       assistantCount: nodes.length,
       text,
+      lastUserText,
+      assistantAfterLastUser,
       streaming: anyVisible(adapter.stopSelectors),
       completeAttr: adapter.completeAttribute && last ? last.hasAttribute(adapter.completeAttribute) : null,
       composerText,
@@ -531,7 +555,7 @@
     return null
   }
 
-  async function waitForSendEvidence(before, timeoutMs, signal) {
+  async function waitForSendEvidence(before, prompt, timeoutMs, signal) {
     const deadline = Date.now() + timeoutMs
     let lastInspectionAt = 0
     while (Date.now() < deadline) {
@@ -543,10 +567,11 @@
         lastInspectionAt = Date.now()
       }
       const state = readAnswerState()
-      if (state.assistantCount > before.assistantCount) return true
-      if (state.streaming) return true
-      if (state.url !== before.url) return true
-      if (before.composerText.trim() && !state.composerText.trim()) return true
+      if (globalThis.MaiSubmission.matchesRenderedPrompt(state.lastUserText, prompt)) return true
+      if (
+        globalThis.MaiSubmission.matchesPrompt(before.composerText, prompt) &&
+        !state.composerText.trim()
+      ) return true
       await delay(350, signal)
     }
     return false
@@ -596,11 +621,12 @@
     }
   }
 
-  async function waitForAnswer(beforeCount, timeoutMs, signal) {
+  async function waitForAnswer(beforeCount, prompt, timeoutMs, signal) {
     throwIfAborted(signal)
     const deadline = Date.now() + timeoutMs
     let lastText = ''
     let stableSince = Date.now()
+    let lastProgressAt = Date.now()
     let lastInspectionAt = 0
 
     while (Date.now() < deadline) {
@@ -613,12 +639,14 @@
       }
 
       const state = readAnswerState()
-      if (state.assistantCount > beforeCount) {
+      const responseMatchesCurrentTurn = globalThis.MaiSubmission.isResponseCorrelated(state, beforeCount, prompt)
+      if (responseMatchesCurrentTurn) {
         const text = normalizeResponseText(state.text)
         if (text) {
           if (text !== lastText) {
             lastText = text
             stableSince = Date.now()
+            lastProgressAt = stableSince
           }
           const stableFor = Date.now() - stableSince
           const completed =
@@ -630,22 +658,40 @@
             await delay(250, signal)
             throwIfAborted(signal)
             const finalState = readAnswerState()
-            const finalText = normalizeResponseText(finalState.text || text)
+            if (!globalThis.MaiSubmission.isResponseCorrelated(finalState, beforeCount, prompt)) {
+              continue
+            }
+            const finalText = normalizeResponseText(finalState.text)
+            if (!finalText) continue
+            if (finalText !== text) {
+              lastText = finalText
+              stableSince = Date.now()
+              lastProgressAt = stableSince
+              continue
+            }
             if (finalText.length < 500 && matchesAny(RATE_LIMIT_PATTERNS, finalText)) {
               throw new MaiError('site', `${adapter.label}: ${finalText}`)
-            }
-            if (!finalText) {
-              throw new MaiError('site', `${adapter.label}: сервис вернул пустой ответ.`)
             }
             return finalText
           }
         }
       }
+      if (globalThis.MaiSubmission.hasNoProgressTimedOut(lastProgressAt, Date.now(), adapter.noProgressMs)) {
+        const partial = globalThis.MaiSubmission.isResponseCorrelated(state, beforeCount, prompt)
+          ? normalizeResponseText(state.text)
+          : ''
+        throw new MaiError(
+          'timeout',
+          `${adapter.label}: ответ не обновлялся ${Math.round(adapter.noProgressMs / 1000)} с. Проверьте состояние вкладки и повторите попытку при необходимости.`,
+          partial || undefined,
+        )
+      }
       await delay(500, signal)
     }
 
     const finalState = readAnswerState()
-    const partial = normalizeResponseText(finalState.text)
+    const finalResponseMatchesCurrentTurn = globalThis.MaiSubmission.isResponseCorrelated(finalState, beforeCount, prompt)
+    const partial = finalResponseMatchesCurrentTurn ? normalizeResponseText(finalState.text) : ''
     if (partial) {
       throw new MaiError(
         'timeout',
@@ -688,7 +734,7 @@
           if (button) clickElement(button)
           else composer.form.requestSubmit()
         },
-        () => waitForSendEvidence(evidenceState, 10_000, signal),
+        () => waitForSendEvidence(evidenceState, prompt, 10_000, signal),
       )
     } catch (error) {
       if (error?.code === 'cancelled') throw error
@@ -706,7 +752,7 @@
     }
 
     sendProgress('waiting', purpose, taskId)
-    return waitForAnswer(before.assistantCount, Math.max(5000, deadline - Date.now()), signal)
+    return waitForAnswer(before.assistantCount, prompt, Math.max(5000, deadline - Date.now()), signal)
   }
 
   const activeRuns = new Map()

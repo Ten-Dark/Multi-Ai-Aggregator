@@ -6,12 +6,36 @@ import test from 'node:test'
 const source = readFileSync(new URL('../zen-extension/content/submission.js', import.meta.url), 'utf8')
 const context = { Object, TypeError, Promise }
 runInNewContext(source, context)
-const { submitOnce, matchesPrompt } = context.MaiSubmission
+const { submitOnce, matchesPrompt, matchesRenderedPrompt, isResponseCorrelated, hasNoProgressTimedOut } = context.MaiSubmission
 
 test('prompt verification accepts only the same text with normalized line endings', () => {
   assert.equal(matchesPrompt('first\r\nsecond', 'first\nsecond'), true)
   assert.equal(matchesPrompt('requested prompt', 'requested prompt '), false)
   assert.equal(matchesPrompt('different prompt', 'requested prompt'), false)
+})
+
+test('rendered user prompt correlation tolerates only trailing DOM line breaks', () => {
+  assert.equal(matchesRenderedPrompt('prompt\n', 'prompt'), true)
+  assert.equal(matchesRenderedPrompt('prompt\n\n', 'prompt'), true)
+  assert.equal(matchesRenderedPrompt('prompt changed', 'prompt'), false)
+  assert.equal(matchesRenderedPrompt('prompt  ', 'prompt'), false)
+})
+
+test('response correlation requires a new assistant node after the exact current user prompt', () => {
+  const correlated = {
+    assistantCount: 2,
+    assistantAfterLastUser: true,
+    lastUserText: 'current prompt',
+  }
+  assert.equal(isResponseCorrelated(correlated, 1, 'current prompt'), true)
+  assert.equal(isResponseCorrelated({ ...correlated, assistantAfterLastUser: false }, 1, 'current prompt'), false)
+  assert.equal(isResponseCorrelated({ ...correlated, lastUserText: 'older prompt' }, 1, 'current prompt'), false)
+  assert.equal(isResponseCorrelated({ ...correlated, assistantCount: 1 }, 1, 'current prompt'), false)
+})
+
+test('no-progress timeout uses elapsed time independently of the overall deadline', () => {
+  assert.equal(hasNoProgressTimedOut(1000, 5999, 5000), false)
+  assert.equal(hasNoProgressTimedOut(1000, 6000, 5000), true)
 })
 
 test('submission invokes the provider action exactly once when evidence is delayed', async () => {

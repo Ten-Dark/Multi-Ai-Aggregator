@@ -35,9 +35,13 @@ After recording the initial baseline, the first reliability slice was implemente
   - Bridge token and approved extension-origin files now live under `userData/zen-secure/`, not directly in the broadly inherited application-data directory.
   - The directory receives a protected DACL granting Full Control only to the current process user SID, SYSTEM, and built-in Administrators. The token file receives a matching protected DACL. The code reads the resulting ACL back and fails closed if unexpected or missing rules are present.
   - Non-Windows systems use `0700` for the directory and `0600` for files.
-  - The old `userData/zen-bridge-token` is rotated and removed only after the new token file is created and its ACL is verified. This invalidates the old extension pairing; the user will need to paste the new pairing code after launching the updated app.
-  - Windows tests verify the DACL in a temporary directory and verify bridge migration/rotation against a temporary user-data directory.
-- Latest validation: `npm run test:security` **PASS, 60/60**; `npm run typecheck` **PASS**; `npm run pack` **PASS**; `npm audit --omit=dev` **0 vulnerabilities**; `git diff --check` **PASS**.
+- The old `userData/zen-bridge-token` is rotated and removed only after the new token file is created and its ACL is verified. This invalidates the old extension pairing; the user will need to paste the new pairing code after launching the updated app.
+- Windows tests verify the DACL in a temporary directory and verify bridge migration/rotation against a temporary user-data directory.
+- Response collection now requires a newly added assistant node to appear after the latest user message, whose normalized text must exactly match the current prompt. A delayed answer that appears before the current prompt in DOM order is ignored.
+- Separate provider no-progress deadlines were added (35 seconds for Qwen; 45 seconds for ChatGPT and DeepSeek). A stalled response is classified as timeout/partial rather than silently treated as complete.
+- Selector provenance is provisional: Qwen's `.user-message-content` is based on community DOM observations ([reference](https://greasyfork.org/en/scripts/588050-qwen-chat-markdown-latex-renderer-user-messages)); DeepSeek's `div.fbb737a4` is based on a community live-DOM capture ([reference](https://github.com/NIyueeE/deepseek-user-message-renderer)). These are not official provider contracts and require validation in the authenticated Zen profile.
+- A reproducible `npm run build:extension` command now builds `release/zen-extension/multi-ai-aggregator-zen-<version>.xpi`, extracts it into a temporary directory, and checks its manifest and required content scripts. The XPI build passed for version `0.3.0`.
+- Latest validation: `npm run test:security` **PASS, 64/64**; `npm run typecheck` **PASS**; `npm run pack` **PASS**; `npm run build:extension` **PASS** (XPI `0.3.0`); `npm audit --omit=dev` **0 vulnerabilities**; `git diff --check` **PASS**.
 - Full `npm audit` still reports six moderate development-toolchain findings in `electron-builder` / `@electron/universal` / `minimatch`; the available automatic fix requires a breaking `electron-builder` downgrade and was not applied.
 - The packaged smoke script was not run after this change because it launches against the real Windows user-data directory and would rotate the active local pairing token. Actual profile migration is pending the next launch of the updated app; the isolated Windows migration test passes.
 
@@ -55,10 +59,9 @@ This closes the blind-retry defect, exact-fill check, and implements Windows tok
 
 ## Confirmed source-level reliability findings
 
-1. **Response correlation is weak — P1.** Collection relies primarily on assistant-node count and the last visible assistant node; it does not establish a robust association with the current user prompt/task.
-2. **Completion detection is weak — P1.** Qwen and DeepSeek rely substantially on text stability and absence of a visible stop control. Temporary pauses may be mistaken for completion; there is no distinct no-progress deadline.
+1. **Response correlation requires live-provider validation — P1.** Prompt matching and DOM-order correlation are implemented and stale-response regression-tested, but Qwen/DeepSeek selectors come from community observations and are not yet verified against the user's authenticated Zen pages.
+2. **Completion detection still needs provider E2E — P1.** Separate no-progress deadlines are implemented, but completion still combines provider stop controls, response stability, and the ChatGPT completion attribute; each provider's behavior must be validated against real streaming sessions.
 3. **Authentication detection is weak — P1.** DeepSeek has no positive logged-out selectors; a visible composer with no detected login marker is treated as logged in. Similar absence-of-logout inference exists for other providers.
-4. **Automation test coverage is insufficient — P1.** Submission and prompt-fill behavior now have deterministic coverage, but response correlation and completion behavior remain untested at the DOM level.
 
 ## Readiness blockers and required evidence
 
@@ -68,8 +71,8 @@ This closes the blind-retry defect, exact-fill check, and implements Windows tok
 | P0 | Harden Windows bridge-token DACL | **Implemented and verified in isolated Windows tests.** Actual user profile migration occurs on next launch and requires extension re-pairing. |
 | P0 | Establish a repeatable normal-send DOM test harness | Tests cover fill, single submit, delayed evidence, missing evidence, cancellation, and no duplicate send. |
 | P1 | Verify exact composer contents | **Implemented and tested**; line endings and NBSP normalized, all other text differences rejected. |
-| P1 | Correlate responses to the current user turn | A stale/late prior response cannot satisfy a newer task. |
-| P1 | Improve completion and no-progress detection | Provider-specific multi-signal completion tests; incomplete output remains partial/timeout. |
+| P1 | Correlate responses to the current user turn | **Implemented and regression-tested for DOM ordering.** Real Qwen/DeepSeek selector validation remains pending. |
+| P1 | Improve completion and no-progress detection | **No-progress deadlines implemented.** Provider-specific multi-signal completion tests remain pending. |
 | P1 | Positive session-state evidence | Logged-in/guest/login-required states are based on positive provider signals, with unknown kept distinct. |
 | P1 | Extension distribution and pairing workflow | Reproducible XPI build/version check and documented user-controlled update/pairing steps. |
 | P1 | Real authenticated E2E | User-approved pairing and manual verification for each supported provider; report each provider separately. |

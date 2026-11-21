@@ -21,5 +21,29 @@
     return normalizePromptText(actual) === normalizePromptText(expected)
   }
 
-  globalThis.MaiSubmission = Object.freeze({ submitOnce, matchesPrompt })
+  function matchesRenderedPrompt(actual, expected) {
+    const stripTrailingLineBreaks = (value) => normalizePromptText(value).replace(/\n+$/g, '')
+    return stripTrailingLineBreaks(actual) === stripTrailingLineBreaks(expected)
+  }
+
+  function isResponseCorrelated(state, beforeCount, prompt) {
+    return Boolean(
+      state &&
+      state.assistantCount > beforeCount &&
+      state.assistantAfterLastUser === true &&
+      matchesRenderedPrompt(state.lastUserText, prompt),
+    )
+  }
+
+  function hasNoProgressTimedOut(lastProgressAt, now, timeoutMs) {
+    return now - lastProgressAt >= timeoutMs
+  }
+
+  globalThis.MaiSubmission = Object.freeze({
+    submitOnce,
+    matchesPrompt,
+    matchesRenderedPrompt,
+    isResponseCorrelated,
+    hasNoProgressTimedOut,
+  })
 })()

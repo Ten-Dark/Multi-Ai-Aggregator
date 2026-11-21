@@ -26,6 +26,7 @@ Tasks:
 - [ ] P0.4 Define typed provider error taxonomy and task submission states, including `submission-unknown` and `partial` semantics; preserve current terminal-state arbitration.
 - [x] P0.5 Add deterministic tests for submission outcomes, prompt verification, and “never resend after ambiguous submission”.
 - [x] P0.6 Move bridge credentials into a dedicated protected directory, apply and verify a Windows DACL for the current user/SYSTEM/Administrators, and rotate the legacy token.
+- [x] P0.7 Add reproducible XPI packaging with archive-content and manifest-version verification.
 
 Exit criteria: baseline recorded; adapter contract documented; all existing tests pass; no source behavior changes without tests.
 
@@ -40,7 +41,7 @@ Tasks:
 - [x] P1.3 Add explicit submission evidence and prevent blind retries after ambiguous send actions (`submission-unknown`).
 - [ ] P1.4 Correlate extracted assistant messages with the current task and latest user message.
 - [ ] P1.5 Implement multi-signal completion detection with `MutationObserver`, generation controls, response stability, and provider-specific completion markers.
-- [ ] P1.6 Separate overall timeout from no-progress timeout and collect timing metrics.
+- [x] P1.6 Separate overall timeout from provider-specific no-progress timeout.
 - [ ] P1.7 Add extraction-quality gates for empty, stale, error-placeholder, and incomplete responses.
 - [ ] P1.8 Test cleanup of observers, timers, and listeners on success, failure, timeout, disconnect, and cancellation.
 

@@ -297,7 +297,7 @@ function createContentHarness() {
   return { dispatch: (message) => listener(message) }
 }
 
-function createSubmittedContentHarness() {
+function createSubmittedContentHarness({ staleResponse = false } = {}) {
   let listener
   let submitted = false
   let clickCount = 0
@@ -306,6 +306,12 @@ function createSubmittedContentHarness() {
     textContent: 'partial response',
     querySelectorAll: () => [],
     hasAttribute: () => false,
+  }
+  const userMessage = {
+    innerText: 'test prompt',
+    textContent: 'test prompt',
+    getBoundingClientRect: () => ({ width: 300, height: 40, top: 0, left: 0, right: 300 }),
+    compareDocumentPosition: () => staleResponse ? 2 : 4,
   }
   class FakeTextArea {
     constructor() {
@@ -338,6 +344,7 @@ function createSubmittedContentHarness() {
     querySelectorAll: (selector) => {
       if (selector === '#prompt-textarea') return [composer]
       if (selector === 'button, [role="button"]') return [button]
+      if (selector === '[data-message-author-role="user"]') return submitted ? [userMessage] : []
       if (selector.includes('button[') || selector.includes('data-testid="send-button"')) return [button]
       if (selector.includes('data-message-role="assistant"') || selector.includes('data-message-author-role="assistant"')) {
         return submitted ? [assistant] : []
@@ -452,6 +459,28 @@ test('content cancellation after submit stops response collection without resubm
 
   assert.equal(cancellation.cancelled, true)
   assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'cancelled')
+  assert.equal(harness.clickCount, 1)
+})
+
+test('content automation ignores a late assistant node that precedes the current user prompt', async () => {
+  const harness = createSubmittedContentHarness({ staleResponse: true })
+  let settled = false
+  const send = harness.dispatch({
+    type: 'mai:send',
+    taskId: TASK_ID,
+    prompt: 'test prompt',
+    timeoutMs: 30_000,
+    purpose: 'answer',
+  }).then((result) => { settled = true; return result })
+
+  await waitFor(() => harness.clickCount === 1)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(settled, false)
+
+  const cancellation = await harness.dispatch({ type: 'mai:cancel', taskId: TASK_ID })
+  const result = await send
+  assert.equal(cancellation.cancelled, true)
   assert.equal(result.error.code, 'cancelled')
   assert.equal(harness.clickCount, 1)
 })
