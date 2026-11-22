@@ -19,7 +19,7 @@ import {
   type ZenConnectorInfo,
 } from '../../shared/types.js'
 import { buildSynthesisPrompt } from '../synthesis/prompt.js'
-import { isAllowedZenExtensionOrigin, isValidZenExtensionOrigin } from './origin.js'
+import { isValidZenExtensionOrigin } from './origin.js'
 import {
   isZenAuthMessage,
   isZenClientHeartbeatMessage,
@@ -223,19 +223,19 @@ export class ZenBridge {
   }
 
   private approveExtensionOrigin(origin: string): boolean {
-    if (this.approvedExtensionOrigin) return this.approvedExtensionOrigin === origin
+    if (!isValidZenExtensionOrigin(origin)) return false
+    if (this.approvedExtensionOrigin === origin) return true
+    const temporaryFile = this.extensionOriginFile + '.' + randomUUID() + '.tmp'
     try {
       fs.mkdirSync(path.dirname(this.extensionOriginFile), { recursive: true })
-      fs.writeFileSync(this.extensionOriginFile, origin, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      fs.writeFileSync(temporaryFile, origin, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      this.storageSecurity.secureFile(temporaryFile, this.secureDir)
+      fs.renameSync(temporaryFile, this.extensionOriginFile)
       this.approvedExtensionOrigin = origin
       return true
     } catch (error) {
-      // Another connection may have completed first; only accept its exact origin.
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
-        this.approvedExtensionOrigin = this.loadApprovedExtensionOrigin()
-        return this.approvedExtensionOrigin === origin
-      }
-      console.error('[zen-bridge] Could not persist the approved extension origin:', error)
+      try { fs.unlinkSync(temporaryFile) } catch { /* A missing temp file is harmless after rename. */ }
+      console.error('[zen-bridge] Could not persist the authenticated extension origin:', error)
       return false
     }
   }
@@ -441,8 +441,10 @@ export class ZenBridge {
 
   private handleConnection(socket: WebSocket, request: IncomingMessage): void {
     const origin = request.headers.origin || ''
-    if (!isAllowedZenExtensionOrigin(origin, this.approvedExtensionOrigin)) {
-      socket.close(1008, 'Origin is not allowed')
+    // The Origin must be canonical. Its UUID may change after reinstall/profile
+    // migration; the stored pin is updated only after pairing-token authentication.
+    if (!isValidZenExtensionOrigin(origin)) {
+      socket.close(1008, 'Invalid extension origin')
       return
     }
 

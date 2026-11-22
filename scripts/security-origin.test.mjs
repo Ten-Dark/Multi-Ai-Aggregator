@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
@@ -93,7 +93,10 @@ async function createBridge(t, prefix) {
   const port = await getAvailablePort()
   const previousPort = process.env.AGGREGATOR_ZEN_PORT
   process.env.AGGREGATOR_ZEN_PORT = String(port)
-  const bridge = new ZenBridge(dataDir, () => {})
+  const bridge = new ZenBridge(dataDir, () => {}, {
+    secureDirectory: (directory) => mkdirSync(directory, { recursive: true }),
+    secureFile: () => {},
+  })
   await bridge.start()
   t.after(async () => {
     await bridge.close()
@@ -103,7 +106,7 @@ async function createBridge(t, prefix) {
   })
   const connection = bridge.getZenConnection()
   const token = connection.pairingCode.slice(connection.pairingCode.lastIndexOf('|') + 1)
-  return { bridge, connection, token }
+  return { bridge, connection, token, dataDir }
 }
 
 function waitForClose(socket, sendOnOpen) {
@@ -155,6 +158,30 @@ function authenticate(wsUrl, origin, token) {
     })
   })
 }
+
+test('rebinds the pinned extension origin only after valid pairing-token authentication', async (t) => {
+  const { connection, token, dataDir } = await createBridge(t, 'multi-ai-origin-rebind-test-')
+  const replacementOrigin = 'moz-extension://bbbbbbbb-1111-2222-3333-abcdefabcdef'
+  const originFile = path.join(dataDir, 'zen-secure', 'zen-bridge-origin')
+
+  const first = await authenticate(connection.wsUrl, APPROVED_ORIGIN, token)
+  assert.equal(first.accepted, true)
+  const firstClosed = new Promise((resolve) => first.socket.once('close', resolve))
+  first.socket.close()
+  await firstClosed
+
+  const rejected = await authenticate(connection.wsUrl, replacementOrigin, 'incorrect-pairing-token')
+  assert.equal(rejected.accepted, false)
+  assert.equal(readFileSync(originFile, 'utf8'), APPROVED_ORIGIN)
+
+  const rebound = await authenticate(connection.wsUrl, replacementOrigin, token)
+  assert.equal(rebound.accepted, true)
+  assert.equal(readFileSync(originFile, 'utf8'), replacementOrigin)
+
+  const invalidOrigin = await authenticate(connection.wsUrl, 'https://example.com', token)
+  assert.equal(invalidOrigin.accepted, false)
+  assert.equal(readFileSync(originFile, 'utf8'), replacementOrigin)
+})
 
 test('can restart the bridge after a clean shutdown', async (t) => {
   const { bridge, connection } = await createBridge(t, 'multi-ai-restart-test-')
