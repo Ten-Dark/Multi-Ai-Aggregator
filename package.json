@@ -1,6 +1,6 @@
 {
   "name": "multi-ai-aggregator",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Local Electron app that queries ChatGPT, Qwen and DeepSeek and synthesizes their answers",
   "main": "dist-electron/main/main.js",

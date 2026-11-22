@@ -33,16 +33,41 @@ jobs:
       - name: Build Zen extension
         run: npm run build:extension
 
+      - name: Lint self-distributed Zen extension
+        run: npx --yes web-ext@10.8.0 lint --source-dir=zen-extension --self-hosted --warnings-as-errors
+
       - name: Generate extension update metadata
         run: node scripts/create-zen-update-manifest.mjs
+
+      - name: Sign Zen extension for self-distribution
+        shell: pwsh
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WEB_EXT_API_KEY) -or [string]::IsNullOrWhiteSpace($env:WEB_EXT_API_SECRET)) {
+            throw 'Mozilla signing credentials are missing. Configure repository secrets AMO_API_KEY and AMO_API_SECRET before publishing a release.'
+          }
+          npx --yes web-ext@10.8.0 sign --source-dir=zen-extension --artifacts-dir=release/signed-extension --channel=unlisted --approval-timeout=900000 --no-input
+          if ($LASTEXITCODE -ne 0) { throw 'Mozilla AMO signing failed.' }
+          $signed = Get-ChildItem 'release/signed-extension/*.xpi' | Select-Object -First 1
+          if (-not $signed) { throw 'Mozilla did not produce a signed XPI.' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($signed.FullName)
+          try {
+            $signature = $archive.Entries | Where-Object { $_.FullName -match '^META-INF/mozilla\.(rsa|sf)$' }
+            if (-not $signature) { throw 'The produced XPI does not contain a Mozilla signature.' }
+          } finally {
+            $archive.Dispose()
+          }
+          Copy-Item $signed.FullName 'release/multi-ai-aggregator-zen.xpi' -Force
 
       - name: Prepare release assets
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $xpi = Get-ChildItem 'release/zen-extension/*.xpi' | Select-Object -First 1
-          if (-not $xpi) { throw 'Zen XPI was not produced.' }
-          Copy-Item $xpi.FullName 'release/multi-ai-aggregator-zen.xpi' -Force
+          if (-not (Test-Path 'release/multi-ai-aggregator-zen.xpi')) { throw 'Signed Zen XPI is missing.' }
           $installer = Get-ChildItem 'release/Multi-AI-Aggregator-Setup-*.exe' | Select-Object -First 1
           if (-not $installer) { throw 'Windows NSIS installer was not produced.' }
           $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()

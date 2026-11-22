@@ -183,3 +183,14 @@ test('Zen extension rejects malformed pairing codes before opening a socket', as
   assert.equal(result.ok, false)
   assert.equal(MockWebSocket.instances.length, 0)
 })
+
+test('Zen extension declares Firefox data-consent categories for the data it handles', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../zen-extension/manifest.json', import.meta.url), 'utf8'))
+  const gecko = manifest.browser_specific_settings.gecko
+  assert.equal(gecko.strict_min_version, '142.0')
+  assert.deepEqual(gecko.data_collection_permissions.required, [
+    'personalCommunications',
+    'websiteContent',
+    'browsingActivity',
+  ])
+})
