@@ -91,6 +91,8 @@ export class ZenBridge {
   private readonly secureDir: string
   private readonly tokenFile: string
   private readonly extensionOriginFile: string
+  private readonly providerConnectorsFile: string
+  private providerConnectors: Record<ModelId, string | null> = { chatgpt: null, qwen: null, deepseek: null }
   private approvedExtensionOrigin: string | null = null
   private server: WebSocketServer | null = null
   private httpServer: http.Server | null = null
@@ -129,8 +131,80 @@ export class ZenBridge {
     this.secureDir = path.join(dataDir, 'zen-secure')
     this.tokenFile = path.join(this.secureDir, 'zen-bridge-token')
     this.extensionOriginFile = path.join(this.secureDir, 'zen-bridge-origin')
+    this.providerConnectorsFile = path.join(dataDir, 'provider-connectors.json')
+    this.providerConnectors = this.loadProviderConnectors()
     this.token = this.loadOrCreateToken()
     this.approvedExtensionOrigin = this.loadApprovedExtensionOrigin()
+  }
+
+  private loadProviderConnectors(): Record<ModelId, string | null> {
+    const defaults: Record<ModelId, string | null> = { chatgpt: null, qwen: null, deepseek: null }
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(this.providerConnectorsFile, 'utf8'))
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return defaults
+      const source = parsed as Record<string, unknown>
+      for (const model of MODEL_IDS) {
+        const value = source[model]
+        if (value === null || value === undefined) continue
+        if (typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+          defaults[model] = value
+        }
+      }
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) {
+        console.warn('[zen-bridge] Provider connector settings could not be loaded; using automatic routing.')
+      }
+    }
+    return defaults
+  }
+
+  private saveProviderConnectors(): void {
+    const temporaryFile = `${this.providerConnectorsFile}.tmp`
+    try {
+      fs.writeFileSync(temporaryFile, JSON.stringify(this.providerConnectors, null, 2), { encoding: 'utf8', mode: 0o600 })
+      fs.renameSync(temporaryFile, this.providerConnectorsFile)
+    } catch (error) {
+      try {
+        fs.unlinkSync(temporaryFile)
+      } catch {
+        // A missing temporary file is harmless after a failed write or rename.
+      }
+      throw error
+    }
+  }
+
+  private connectorForModel(model: ModelId) {
+    const assignedId = this.providerConnectors[model]
+    return assignedId ? this.connectors.get(assignedId) : this.connectors.getActive()
+  }
+
+  setProviderConnector(model: ModelId, instanceId: string | null): ZenConnectionInfo {
+    if (!MODEL_IDS.includes(model)) throw new BridgeError('unknown', 'Неизвестный провайдер.')
+    if (instanceId !== null) {
+      const target = this.connectors.get(instanceId)
+      if (!target || target.transport.readyState !== WebSocket.OPEN
+        || !this.connectors.isFresh(target, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
+        throw new BridgeError('browser', 'Выбранный профиль браузера не подключён или не отвечает.')
+      }
+    }
+
+    const previous = this.providerConnectors[model]
+    this.providerConnectors[model] = instanceId
+    try {
+      this.saveProviderConnectors()
+    } catch {
+      this.providerConnectors[model] = previous
+      throw new BridgeError('browser', 'Не удалось сохранить привязку профиля провайдера.')
+    }
+
+    this.emit({ type: 'zen-connection', connection: this.getZenConnection() })
+    return this.getZenConnection()
+  }
+
+  private async refreshSessionsAfterRouteChange(): Promise<void> {
+    const inFlight = this.sessionCheck
+    if (inFlight) await inFlight.catch(() => [])
+    await this.checkSessions()
   }
 
   private loadApprovedExtensionOrigin(): string | null {
@@ -228,6 +302,7 @@ export class ZenBridge {
       lastHeartbeatAt: active?.lastHeartbeatAt,
       activeConnectorId: active?.instanceId,
       connectors,
+      providerConnectors: { ...this.providerConnectors },
     }
   }
 
@@ -236,10 +311,6 @@ export class ZenBridge {
     if (!target || target.transport.readyState !== WebSocket.OPEN
       || !this.connectors.isFresh(target, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
       throw new BridgeError('browser', 'Выбранный профиль браузера больше не подключён или не отвечает.')
-    }
-    if (this.connectors.getActive()?.instanceId !== instanceId
-      && (this.pending.size > 0 || this.running.size > 0 || this.batchActive || this.synthesisActive || this.sessionCheck)) {
-      throw new BridgeError('busy', 'Нельзя переключить профиль, пока выполняются команды. Дождитесь завершения текущих операций.')
     }
     if (!this.connectors.setActive(instanceId)) {
       throw new BridgeError('browser', 'Выбранный профиль браузера больше не подключён.')
@@ -251,7 +322,7 @@ export class ZenBridge {
       browserName: active?.browserName ?? 'Zen Browser',
       message: 'Активный профиль браузера изменён.',
     })
-    void this.checkSessions().catch((error: unknown) => {
+    void this.refreshSessionsAfterRouteChange().catch((error: unknown) => {
       console.error('[zen-bridge] Session check after connector selection failed:', error)
     })
     return this.getZenConnection()
@@ -670,7 +741,12 @@ export class ZenBridge {
   }
 
   async focusModel(model: ModelId): Promise<void> {
-    await this.sendCommand('focus', { model }, 20_000)
+    const connector = this.connectorForModel(model)
+    if (!connector || connector.transport.readyState !== WebSocket.OPEN
+      || !this.connectors.isFresh(connector, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
+      throw new BridgeError('browser', `${MODEL_LABELS[model]}: профиль провайдера не подключён или не отвечает.`)
+    }
+    await this.sendCommand('focus', { model }, 20_000, connector.instanceId, connector.generation)
   }
 
   async checkSessions(): Promise<SessionInfo[]> {
@@ -683,28 +759,63 @@ export class ZenBridge {
   }
 
   private async runSessionCheck(): Promise<SessionInfo[]> {
-    if (!this.socket || !this.authenticated) {
-      const message =
-        'Расширение Zen не подключено. Откройте расширение Multi-AI Aggregator Bridge в Zen и вставьте код подключения из приложения.'
-      return MODEL_IDS.map((model) => ({ model, status: 'error' as const, message }))
+    const groups = new Map<string, { connectorId: string; generation: number; models: ModelId[] }>()
+    const sessions = new Map<ModelId, SessionInfo>()
+
+    for (const model of MODEL_IDS) {
+      const connector = this.connectorForModel(model)
+      if (!connector || connector.transport.readyState !== WebSocket.OPEN
+        || !this.connectors.isFresh(connector, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
+        sessions.set(model, {
+          model,
+          status: 'error',
+          message: this.providerConnectors[model]
+            ? 'Закреплённый профиль этого провайдера не подключён. Переподключите его или выберите другой профиль.'
+            : 'Нет активного подключённого профиля браузера.',
+        })
+        continue
+      }
+      const key = `${connector.instanceId}:${connector.generation}`
+      const group = groups.get(key) ?? {
+        connectorId: connector.instanceId,
+        generation: connector.generation,
+        models: [],
+      }
+      group.models.push(model)
+      groups.set(key, group)
     }
 
-    try {
-      const data = await this.sendCommand('checkSessions', {}, CHECK_SESSIONS_TIMEOUT_MS)
-      const sessions = this.normalizeSessions(data)
-      for (const session of sessions) this.emit({ type: 'session', session })
-      return sessions
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Расширение Zen не смогло проверить сессии.'
-      return MODEL_IDS.map((model) => {
-        const session: SessionInfo = { model, status: 'error', message }
-        this.emit({ type: 'session', session })
-        return session
-      })
-    }
+    await Promise.all([...groups.values()].map(async (group) => {
+      try {
+        const data = await this.sendCommand(
+          'checkSessions',
+          {},
+          CHECK_SESSIONS_TIMEOUT_MS,
+          group.connectorId,
+          group.generation,
+        )
+        const discovered = this.normalizeSessions(data)
+        for (const model of group.models) {
+          const session = discovered.find((item) => item.model === model)
+          sessions.set(model, session ?? {
+            model,
+            status: 'error',
+            message: 'Расширение не вернуло состояние этого провайдера.',
+          })
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Не удалось проверить сессию провайдера.'
+        for (const model of group.models) sessions.set(model, { model, status: 'error', message })
+      }
+    }))
+
+    const result = MODEL_IDS.map((model) => sessions.get(model) ?? {
+      model,
+      status: 'error' as const,
+      message: 'Состояние провайдера не получено.',
+    })
+    for (const session of result) this.emit({ type: 'session', session })
+    return result
   }
 
   private normalizeSessions(data: unknown): SessionInfo[] {
@@ -760,6 +871,12 @@ export class ZenBridge {
 
     const batchId = randomUUID()
     const taskIds = new Map(MODEL_IDS.map((model) => [model, randomUUID()]))
+    const routes = new Map<ModelId, { connectorId: string; generation: number } | null>(
+      MODEL_IDS.map((model) => {
+        const connector = this.connectorForModel(model)
+        return [model, connector ? { connectorId: connector.instanceId, generation: connector.generation } : null]
+      }),
+    )
     this.batchActive = true
     try {
       for (const model of MODEL_IDS) {
@@ -775,7 +892,7 @@ export class ZenBridge {
         })
       }
       return await Promise.all(
-        MODEL_IDS.map((model) => this.sendOneInternal(model, prompt, taskIds.get(model)!, batchId)),
+        MODEL_IDS.map((model) => this.sendOneInternal(model, prompt, taskIds.get(model)!, batchId, routes.get(model)!)),
       )
     } finally {
       this.batchActive = false
@@ -902,6 +1019,7 @@ export class ZenBridge {
     prompt: string,
     taskId: TaskId = randomUUID(),
     batchId?: TaskId,
+    route?: { connectorId: string; generation: number } | null,
   ): Promise<ModelResult> {
     if (this.running.has(model)) {
       return {
@@ -915,12 +1033,20 @@ export class ZenBridge {
       }
     }
 
-    const connector = this.connectors.getActive()
-    if (!connector || connector.transport.readyState !== WebSocket.OPEN
+    const connector = route === undefined
+      ? this.connectorForModel(model)
+      : route
+        ? this.connectors.get(route.connectorId)
+        : undefined
+    if (!connector || (route && connector.generation !== route.generation)
+      || connector.transport.readyState !== WebSocket.OPEN
       || !this.connectors.isFresh(connector, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
       return {
         model, taskId, batchId, status: 'error',
-        error: 'Нет активного подключённого профиля браузера.', errorCode: 'browser', updatedAt: Date.now(),
+        error: this.providerConnectors[model]
+          ? `${MODEL_LABELS[model]}: закреплённый профиль не подключён или не отвечает.`
+          : 'Нет активного подключённого профиля браузера.',
+        errorCode: 'browser', updatedAt: Date.now(),
       }
     }
     const task: ActiveTask = { taskId, batchId, model, connectorId: connector.instanceId, connectorGeneration: connector.generation, status: 'opening' }
@@ -1033,7 +1159,11 @@ export class ZenBridge {
     if (!answers.some((answer) => answer.text?.trim())) {
       throw new Error('Нет ни одного полученного ответа для синтеза.')
     }
-
+    const connector = this.connectorForModel(request.model)
+    if (!connector || connector.transport.readyState !== WebSocket.OPEN
+      || !this.connectors.isFresh(connector, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
+      throw new BridgeError('browser', `${MODEL_LABELS[request.model]}: профиль провайдера не подключён или не отвечает.`)
+    }
     this.synthesisActive = true
     this.running.add(request.model)
     try {
@@ -1049,6 +1179,8 @@ export class ZenBridge {
           purpose: 'synthesis',
         },
         SYNTHESIS_TIMEOUT_MS + COMMAND_GRACE_MS,
+        connector.instanceId,
+        connector.generation,
       )
       if (!data || typeof data !== 'object' || (data as Record<string, unknown>).taskId !== taskId) {
         throw new BridgeError('unknown', `${MODEL_LABELS[request.model]}: ответ синтеза не совпадает с идентификатором задачи.`)

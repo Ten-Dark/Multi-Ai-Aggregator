@@ -1,4 +1,4 @@
-import type { ZenConnectorInfo } from '../../shared/types'
+import { MODEL_IDS, MODEL_LABELS, type ModelId, type ZenConnectorInfo } from '../../shared/types'
 
 interface ConnectionPanelProps {
   connected: boolean
@@ -7,7 +7,9 @@ interface ConnectionPanelProps {
   browserVersion?: string
   connectors: ZenConnectorInfo[]
   activeConnectorId?: string
+  providerConnectors?: Record<ModelId, string | null>
   onSelectConnector: (instanceId: string) => void
+  onSelectProviderConnector: (model: ModelId, instanceId: string | null) => void
   copied: boolean
   onCopy: (key: string, text: string) => void
 }
@@ -19,7 +21,9 @@ export function ConnectionPanel({
   browserVersion,
   connectors,
   activeConnectorId,
+  providerConnectors,
   onSelectConnector,
+  onSelectProviderConnector,
   copied,
   onCopy,
 }: ConnectionPanelProps) {
@@ -40,7 +44,7 @@ export function ConnectionPanel({
           )}
           {connectors.length > 0 && (
             <div className="connector-list">
-              <label htmlFor="active-connector">Активный профиль</label>
+              <label htmlFor="active-connector">Активный профиль по умолчанию</label>
               <select
                 id="active-connector"
                 value={activeConnectorId ?? ''}
@@ -53,8 +57,42 @@ export function ConnectionPanel({
                   </option>
                 ))}
               </select>
-              <p className="hint">Профили различаются по идентификатору расширения. Путь и имя профиля браузера пока не определяются.</p>
             </div>
+          )}
+          <div className="connector-list provider-connector-list">
+            <h3>Профиль для каждого провайдера</h3>
+            {MODEL_IDS.map((model) => {
+              const assignedId = providerConnectors?.[model] ?? null
+              const assignedIsConnected = assignedId === null || connectors.some((item) => item.instanceId === assignedId)
+              return (
+                <div className="provider-connector-row" key={model}>
+                  <label htmlFor={`provider-connector-${model}`}>{MODEL_LABELS[model]}</label>
+                  <select
+                    id={`provider-connector-${model}`}
+                    value={assignedId ?? ''}
+                    onChange={(event) => onSelectProviderConnector(model, event.target.value || null)}
+                  >
+                    <option value="">Автоматически · активный профиль</option>
+                    {assignedId && !assignedIsConnected && (
+                      <option value={assignedId} disabled>
+                        Профиль недоступен · {assignedId.slice(0, 8)}
+                      </option>
+                    )}
+                    {connectors.map((connector) => (
+                      <option key={connector.instanceId} value={connector.instanceId}>
+                        {connector.browserName} · {connector.instanceId.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
+            <p className="hint">
+              Привязки сохраняются локально. Если закреплённый профиль отключится, запрос провайдера завершится ошибкой — автоматического переноса на другой профиль не будет.
+            </p>
+          </div>
+          {connectors.length > 0 && (
+            <p className="hint">Профили различаются по идентификатору расширения. Путь и имя профиля браузера пока не определяются.</p>
           )}
         </div>
         <span className={`status-pill tone-${connected ? 'ok' : 'warn'}`}>

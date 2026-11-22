@@ -128,6 +128,15 @@ export function registerAggregatorIpc(
     return getBridge().setActiveConnector(instanceId)
   })
 
+  ipcMain.handle('aggregator:setProviderConnector', async (event, model: unknown, instanceId: unknown) => {
+    assertTrustedSender(event)
+    assertModel(model)
+    if (instanceId !== null && (typeof instanceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(instanceId))) {
+      throw new Error('Некорректный идентификатор профиля браузера.')
+    }
+    return getBridge().setProviderConnector(model, instanceId as string | null)
+  })
+
   ipcMain.handle('aggregator:launchBrowser', async (event) => {
     assertTrustedSender(event)
     return getBridge().openBrowser()

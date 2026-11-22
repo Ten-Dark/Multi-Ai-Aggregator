@@ -45,7 +45,7 @@ test('preload forwards valid typed events and ignores malformed payloads', () =>
     { type: 'model', result: { model: 'chatgpt', status: 'cancelling', updatedAt: 124, taskId: '2f1a6e40-7a53-4c21-9e11-6e7c8b0f1234' } },
     { type: 'model', result: { model: 'deepseek', status: 'cancelled', updatedAt: 125, taskId: '2f1a6e40-7a53-4c21-9e11-6e7c8b0f1234', batchId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } },
     { type: 'model', result: { model: 'qwen', status: 'error', updatedAt: 126, errorCode: 'cancelled', error: 'Operation cancelled.' } },
-    { type: 'zen-connection', connection: { pairingCode: 'ws://127.0.0.1:45123|token', wsUrl: 'ws://127.0.0.1:45123', connected: true } },
+    { type: 'zen-connection', connection: { pairingCode: 'ws://127.0.0.1:45123|token', wsUrl: 'ws://127.0.0.1:45123', connected: true, providerConnectors: { chatgpt: null, qwen: '123e4567-e89b-42d3-a456-426614174000', deepseek: null } } },
   ]
 
   for (const event of validEvents) preload.dispatch(event)
@@ -62,6 +62,7 @@ test('preload forwards valid typed events and ignores malformed payloads', () =>
     { type: 'model', result: { model: 'chatgpt', status: 'done', updatedAt: 1, taskId: 'invalid-id' } },
     { type: 'model', result: { model: 'chatgpt', status: 'cancelled', updatedAt: 1, batchId: 'not-a-uuid' } },
     { type: 'zen-connection', connection: { pairingCode: 1, wsUrl: 'bad', connected: true } },
+    { type: 'zen-connection', connection: { pairingCode: 'code', wsUrl: 'ws://127.0.0.1:45123', connected: true, providerConnectors: { chatgpt: 42, qwen: null, deepseek: null } } },
   ]) preload.dispatch(event)
 
   assert.equal(received.length, validEvents.length)

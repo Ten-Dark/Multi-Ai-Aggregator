@@ -145,22 +145,21 @@ test('bridge keeps multiple profiles connected, replaces only matching identity,
   })
   const sessionsPromise = bridge.checkSessions()
   const command = await firstCommand
-  assert.throws(() => bridge.setActiveConnector(IDS.second), /Нельзя переключить профиль/)
+  const selectedCommand = waitForMessage(second, (message) => message.type === 'command' && message.action === 'checkSessions')
+  const selected = bridge.setActiveConnector(IDS.second)
+  assert.equal(selected.activeConnectorId, IDS.second)
+
   second.send(JSON.stringify({ type: 'response', id: command.id, ok: true, data: sessionsPayload() }))
   await new Promise((resolve) => setTimeout(resolve, 15))
   replacement.send(JSON.stringify({ type: 'response', id: command.id, ok: true, data: sessionsPayload() }))
   const sessions = await sessionsPromise
   assert.equal(sessions.length, 3)
-  await new Promise((resolve) => setTimeout(resolve, 30))
-  assert.equal(secondCommands.length, 0, 'inactive profile must not receive active-profile commands')
 
-  const selectedCommand = waitForMessage(second, (message) => message.type === 'command' && message.action === 'checkSessions')
-  const selected = bridge.setActiveConnector(IDS.second)
-  assert.equal(selected.activeConnectorId, IDS.second)
   const routedCommand = await selectedCommand
   second.send(JSON.stringify({ type: 'response', id: routedCommand.id, ok: true, data: sessionsPayload() }))
   await waitForCondition(() => bridge.getZenConnection().activeConnectorId === IDS.second)
   assert.equal(bridge.getZenConnection().activeConnectorId, IDS.second)
+  assert.equal(secondCommands.some((item) => item.id === routedCommand.id), true)
 
   const heartbeatCloseCode = await waitForClose(second, () => {
     second.send(JSON.stringify({ type: 'client-heartbeat', instanceId: IDS.first }))
@@ -171,6 +170,121 @@ test('bridge keeps multiple profiles connected, replaces only matching identity,
   assert.equal(bridge.getZenConnection().activeConnectorId, IDS.first)
   assert.equal(bridge.getZenConnection().connectors.length, 1)
   replacement.close()
+})
+
+
+test('provider affinity routes each model independently, snapshots batch routes, and persists assignments', async (t) => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), 'mai-provider-affinity-'))
+  const previousPort = process.env.AGGREGATOR_ZEN_PORT
+  process.env.AGGREGATOR_ZEN_PORT = String(await getAvailablePort())
+  const bridge = new ZenBridge(dataDir, () => {}, {
+    secureDirectory: (directory) => mkdirSync(directory, { recursive: true }),
+    secureFile: () => {},
+  })
+
+  t.after(async () => {
+    await bridge.close()
+    if (previousPort === undefined) delete process.env.AGGREGATOR_ZEN_PORT
+    else process.env.AGGREGATOR_ZEN_PORT = previousPort
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  await bridge.start()
+  const initial = bridge.getZenConnection()
+  const token = initial.pairingCode.slice(initial.pairingCode.lastIndexOf('|') + 1)
+  const first = await connectConnector(initial.wsUrl, token, IDS.first, 'Zen')
+  const second = await connectConnector(initial.wsUrl, token, IDS.second, 'Firefox')
+  await waitForCondition(() => bridge.getZenConnection().connectors?.length === 2)
+
+  const firstSessionCommand = waitForMessage(first, (message) => message.type === 'command' && message.action === 'checkSessions')
+  const secondSessionCommand = waitForMessage(second, (message) => message.type === 'command' && message.action === 'checkSessions')
+  bridge.setProviderConnector('chatgpt', IDS.second)
+  bridge.setProviderConnector('qwen', IDS.first)
+  const sessionsPromise = bridge.checkSessions()
+  const [firstCheck, secondCheck] = await Promise.all([firstSessionCommand, secondSessionCommand])
+  first.send(JSON.stringify({
+    type: 'response', id: firstCheck.id, ok: true,
+    data: sessionsPayload().map((session) => ({ ...session, message: 'from-profile-one' })),
+  }))
+  second.send(JSON.stringify({
+    type: 'response', id: secondCheck.id, ok: true,
+    data: sessionsPayload().map((session) => ({ ...session, message: 'from-profile-two' })),
+  }))
+  const sessions = await sessionsPromise
+  assert.equal(sessions.find((session) => session.model === 'chatgpt').message, 'from-profile-two')
+  assert.equal(sessions.find((session) => session.model === 'qwen').message, 'from-profile-one')
+  assert.equal(sessions.find((session) => session.model === 'deepseek').message, 'from-profile-one')
+
+  const sendAllPromise = bridge.sendAll('route each provider to its assigned profile')
+  bridge.connectors.setActive(IDS.second)
+  const [chatgptCommand, qwenCommand, deepseekCommand] = await Promise.all([
+    waitForMessage(second, (message) => message.type === 'command' && message.action === 'send' && message.payload.model === 'chatgpt'),
+    waitForMessage(first, (message) => message.type === 'command' && message.action === 'send' && message.payload.model === 'qwen'),
+    waitForMessage(first, (message) => message.type === 'command' && message.action === 'send' && message.payload.model === 'deepseek'),
+  ])
+  assert.equal(chatgptCommand.payload.model, 'chatgpt')
+  assert.equal(qwenCommand.payload.model, 'qwen')
+  assert.equal(deepseekCommand.payload.model, 'deepseek')
+  assert.equal(bridge.getZenConnection().providerConnectors.chatgpt, IDS.second)
+  assert.equal(bridge.getZenConnection().providerConnectors.qwen, IDS.first)
+  assert.equal(bridge.getZenConnection().providerConnectors.deepseek, null)
+
+  second.send(JSON.stringify({
+    type: 'response', id: chatgptCommand.id, ok: true,
+    data: { taskId: chatgptCommand.payload.taskId, text: 'ChatGPT from profile two' },
+  }))
+  first.send(JSON.stringify({
+    type: 'response', id: qwenCommand.id, ok: true,
+    data: { taskId: qwenCommand.payload.taskId, text: 'Qwen from profile one' },
+  }))
+  first.send(JSON.stringify({
+    type: 'response', id: deepseekCommand.id, ok: true,
+    data: { taskId: deepseekCommand.payload.taskId, text: 'DeepSeek from profile one' },
+  }))
+  const results = await sendAllPromise
+  assert.equal(results.every((result) => result.status === 'done'), true)
+  assert.equal(results.find((result) => result.model === 'chatgpt').text, 'ChatGPT from profile two')
+  assert.equal(results.find((result) => result.model === 'qwen').text, 'Qwen from profile one')
+  assert.equal(results.find((result) => result.model === 'deepseek').text, 'DeepSeek from profile one')
+
+  const focusPromise = bridge.focusModel('chatgpt')
+  const focusCommand = await waitForMessage(second, (message) => message.type === 'command' && message.action === 'focus')
+  assert.equal(focusCommand.payload.model, 'chatgpt')
+  second.send(JSON.stringify({ type: 'response', id: focusCommand.id, ok: true, data: {} }))
+  await focusPromise
+
+  const synthesisPromise = bridge.synthesize({
+    model: 'qwen',
+    prompt: 'Synthesize the result',
+    answers: [{ model: 'chatgpt', text: 'An answer' }],
+  })
+  const synthesisCommand = await waitForMessage(first, (message) => message.type === 'command' && message.action === 'send' && message.payload.purpose === 'synthesis')
+  assert.equal(synthesisCommand.payload.model, 'qwen')
+  first.send(JSON.stringify({
+    type: 'response', id: synthesisCommand.id, ok: true,
+    data: { taskId: synthesisCommand.payload.taskId, text: 'Synthesis from profile one' },
+  }))
+  const synthesis = await synthesisPromise
+  assert.equal(synthesis.text, 'Synthesis from profile one')
+
+  const restarted = new ZenBridge(dataDir, () => {}, {
+    secureDirectory: (directory) => mkdirSync(directory, { recursive: true }),
+    secureFile: () => {},
+  })
+  assert.deepEqual(restarted.getZenConnection().providerConnectors, {
+    chatgpt: IDS.second,
+    qwen: IDS.first,
+    deepseek: null,
+  })
+  await restarted.close()
+
+  const secondClosed = new Promise((resolve) => second.once('close', resolve))
+  second.close()
+  await secondClosed
+  const unavailable = await bridge.sendOne('chatgpt', 'must not fall back to another profile')
+  assert.equal(unavailable.status, 'error')
+  assert.match(unavailable.error, /закреплённый профиль/)
+  first.close()
 })
 
 test('task and cancellation remain pinned to the originating connector generation', async (t) => {

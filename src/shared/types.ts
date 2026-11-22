@@ -136,6 +136,7 @@ export interface ZenConnectionInfo {
   lastHeartbeatAt?: number
   activeConnectorId?: string
   connectors?: ZenConnectorInfo[]
+  providerConnectors?: Record<ModelId, string | null>
 }
 
 export type AggregatorEvent =
@@ -159,5 +160,6 @@ export interface AggregatorApi {
   getAppVersion: () => Promise<string>
   getZenConnection: () => Promise<ZenConnectionInfo>
   setActiveConnector: (instanceId: string) => Promise<ZenConnectionInfo>
+  setProviderConnector: (model: ModelId, instanceId: string | null) => Promise<ZenConnectionInfo>
   onEvent: (callback: (event: AggregatorEvent) => void) => () => void
 }

@@ -53,6 +53,8 @@ function isAggregatorEvent(value) {
       typeof connection.wsUrl === 'string' && typeof connection.connected === 'boolean' &&
       (connection.extensionVersion === undefined || typeof connection.extensionVersion === 'string') &&
       (connection.activeConnectorId === undefined || typeof connection.activeConnectorId === 'string') &&
+      (connection.providerConnectors === undefined || (isRecord(connection.providerConnectors) &&
+        ['chatgpt', 'qwen', 'deepseek'].every((model) => connection.providerConnectors[model] === null || typeof connection.providerConnectors[model] === 'string'))) &&
       (connection.connectors === undefined || (Array.isArray(connection.connectors) && connection.connectors.every((connector) =>
         isRecord(connector) && typeof connector.instanceId === 'string' &&
         typeof connector.browserName === 'string' && typeof connector.browserVersion === 'string' &&
@@ -78,6 +80,7 @@ contextBridge.exposeInMainWorld('aggregator', {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   getZenConnection: () => ipcRenderer.invoke('aggregator:getZenConnection'),
   setActiveConnector: (instanceId) => ipcRenderer.invoke('aggregator:setActiveConnector', instanceId),
+  setProviderConnector: (model, instanceId) => ipcRenderer.invoke('aggregator:setProviderConnector', model, instanceId),
   onEvent: (callback) => {
     if (typeof callback !== 'function') return () => {}
     const handler = (_event, payload) => {

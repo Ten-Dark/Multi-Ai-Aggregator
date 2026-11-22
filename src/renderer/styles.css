@@ -654,6 +654,31 @@ select {
   font-size: 11px;
 }
 
+.provider-connector-list {
+  max-width: 520px;
+  gap: 9px;
+}
+
+.provider-connector-list h3 {
+  margin: 2px 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.provider-connector-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .provider-connector-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 .pairing-code-row {
   display: flex;
   align-items: stretch;
