@@ -286,6 +286,31 @@ body {
   max-width: 720px;
 }
 
+.session-diagnostics {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.session-diagnostics summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.session-diagnostics pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .alert.error {
   padding: 10px 14px;
   border-radius: 10px;

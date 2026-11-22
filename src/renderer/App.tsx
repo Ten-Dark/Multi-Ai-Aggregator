@@ -67,6 +67,13 @@ export function App() {
         </span>
       </section>
 
+      {sessions.qwen.diagnostics && (
+        <details className="session-diagnostics">
+          <summary>Диагностика Qwen</summary>
+          <pre>{JSON.stringify(sessions.qwen.diagnostics, null, 2)}</pre>
+        </details>
+      )}
+
       {globalError && (
         <div className="alert error" role="alert">
           {globalError}

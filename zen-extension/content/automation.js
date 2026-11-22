@@ -294,8 +294,77 @@
     const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'))
     return candidates.some((element) => {
       if (!isVisible(element)) return false
-      return isQwenAuthActionLabel(element.innerText || element.getAttribute('aria-label') || '')
+      return isQwenAuthActionLabel(element.innerText) || isQwenAuthActionLabel(element.getAttribute('aria-label'))
     })
+  }
+
+  function getVisibleQwenAuthLabels() {
+    if (MODEL !== 'qwen') return []
+    return Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .filter((element) => isVisible(element))
+      .flatMap((element) => [element.innerText, element.getAttribute('aria-label')])
+      .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
+      .filter(isQwenAuthActionLabel)
+      .filter((value, index, values) => values.indexOf(value) === index)
+  }
+
+  function hasVisibleAccountLogoutAction() {
+    const logoutLabel = /^(?:log out|sign out|log off|выйти из системы|выйти из аккаунта|выйти)$/i
+    return Array.from(document.querySelectorAll('button, a, [role="button"]')).some((element) => {
+      if (!isVisible(element)) return false
+      return logoutLabel.test(element.innerText || '') || logoutLabel.test(element.getAttribute('aria-label') || '')
+    })
+  }
+
+  function createQwenDiagnostics(page, cookieEvidence) {
+    if (MODEL !== 'qwen') return undefined
+    const profileSelectors = adapter.loggedInSelectors.map((selector) => {
+      let count = 0
+      try {
+        count = Array.from(document.querySelectorAll(selector)).filter((element) => isVisible(element)).length
+      } catch {
+        // Ignore invalid or unsupported selectors in diagnostics.
+      }
+      return { selector, visibleMatches: count }
+    })
+    const header = document.querySelector('header') ||
+      Array.from(document.querySelectorAll('[class*="header"]')).find((element) => isVisible(element))
+    const headerControlHints = header
+      ? Array.from(header.querySelectorAll('button, a, [role="button"], img'))
+          .filter((element) => isVisible(element))
+          .slice(0, 16)
+          .map((element) => {
+            const className = typeof element.className === 'string' ? element.className : ''
+            const ariaLabel = element.getAttribute('aria-label') || ''
+            const testId = element.getAttribute('data-testid') || ''
+            return {
+              tag: element.tagName.toLowerCase(),
+              classes: className.split(/\s+/).filter(Boolean).slice(0, 5),
+              ariaLabel: /profile|account|avatar|user|log\s*out|sign\s*out|log\s*in|sign\s*in/i.test(ariaLabel) ? ariaLabel.slice(0, 80) : '',
+              testId: /profile|account|avatar|user|log\s*out|sign\s*out|log\s*in|sign\s*in/i.test(testId) ? testId.slice(0, 80) : '',
+            }
+          })
+      : []
+    let safeUrl = page.url
+    try {
+      const url = new URL(page.url)
+      safeUrl = `${url.origin}${url.pathname}`
+    } catch {
+      // Keep the page URL only when it is not parseable.
+    }
+    return {
+      url: safeUrl,
+      title: page.title,
+      composerVisible: page.composerVisible,
+      loginActions: getVisibleQwenAuthLabels(),
+      profileSelectors,
+      accountMenuLogoutVisible: page.accountMenuLogoutVisible,
+      cookieEvidence: {
+        available: cookieEvidence?.available === true,
+        matchedNames: Array.isArray(cookieEvidence?.matchedCookieNames) ? cookieEvidence.matchedCookieNames : [],
+      },
+      headerControlHints,
+    }
   }
 
   function inspectPage() {
@@ -308,7 +377,7 @@
       loginFormVisible: anyVisible(adapter.loginFormSelectors),
       loggedOutVisible: anyVisible(adapter.loggedOutSelectors) || hasVisibleQwenAuthAction(),
       loggedInVisible: anyVisible(adapter.loggedInSelectors),
-      accountMenuLogoutVisible: /(?:выйти из системы|выйти из аккаунта|log\s*out|sign\s*out)/i.test(document.body?.innerText || ''),
+      accountMenuLogoutVisible: hasVisibleAccountLogoutAction(),
     }
   }
 
@@ -396,11 +465,21 @@
       if (blocker) return sessionForBlocker(blocker, page)
       if (page.composerVisible) {
         if (page.loggedOutVisible) {
+          const diagnostics = createQwenDiagnostics(page, cookieEvidence)
+          if (MODEL === 'qwen' && cookieEvidence?.sessionCookiePresent === true) {
+            return {
+              status: 'session-available',
+              message: 'Qwen показывает кнопки входа, но обнаружена cookie сессии. Сигналы противоречат друг другу; действительность авторизации не подтверждена.',
+              url: page.url,
+              diagnostics,
+            }
+          }
           if (!adapter.guestAllowed) {
             return {
               status: 'login-required',
               message: 'Требуется вход в аккаунт для работы с этим сервисом.',
               url: page.url,
+              diagnostics,
             }
           }
           return {
@@ -409,22 +488,30 @@
               ? 'Гость — отправка доступна. Для стабильной работы войдите в аккаунт.'
               : 'Вход не выполнен.',
             url: page.url,
+            diagnostics,
           }
         }
         if (page.loggedInVisible || page.accountMenuLogoutVisible) {
-          return { status: 'logged-in', message: 'Вход подтверждён по элементам аккаунта.', url: page.url }
+          return {
+            status: 'logged-in',
+            message: 'Вход подтверждён по элементам аккаунта.',
+            url: page.url,
+            diagnostics: createQwenDiagnostics(page, cookieEvidence),
+          }
         }
         if (cookieEvidence?.sessionCookiePresent === true) {
           return {
             status: 'session-available',
             message: 'Поле ввода доступно и найдена cookie сессии. Действительность авторизации ещё не подтверждена.',
             url: page.url,
+            diagnostics: createQwenDiagnostics(page, cookieEvidence),
           }
         }
         return {
           status: 'unknown',
           message: 'Поле ввода доступно, но признаки авторизации не обнаружены.',
           url: page.url,
+          diagnostics: createQwenDiagnostics(page, cookieEvidence),
         }
       }
       if (page.loginFormVisible) {

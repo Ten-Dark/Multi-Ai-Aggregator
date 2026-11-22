@@ -443,6 +443,29 @@ async function executeAction(action, payload) {
           }
         }
         const info = await inspectModelSession(model, tabId)
+        if (model === 'qwen') {
+          let selectedUrl = tab.url || ''
+          try {
+            const parsedUrl = new URL(selectedUrl)
+            selectedUrl = `${parsedUrl.origin}${parsedUrl.pathname}`
+          } catch {
+            // Keep an unparsable URL out of diagnostic details.
+            selectedUrl = ''
+          }
+          return {
+            model,
+            ...info,
+            diagnostics: {
+              ...(info.diagnostics || {}),
+              selectedTab: {
+                id: tab.id,
+                active: tab.active === true,
+                status: tab.status || 'unknown',
+                url: selectedUrl,
+              },
+            },
+          }
+        }
         return { model, ...info }
       } catch (error) {
         return {
@@ -785,20 +808,24 @@ const SESSION_COOKIE_NAME_PATTERNS = {
 
 async function getProviderCookieEvidence(model, tabUrl) {
   if (!browser.cookies?.getAll || !SESSION_COOKIE_NAME_PATTERNS[model]) {
-    return { available: false, sessionCookiePresent: false }
+    return { available: false, sessionCookiePresent: false, matchedCookieNames: [] }
   }
 
   try {
     const cookies = await browser.cookies.getAll({ url: tabUrl })
     const now = Date.now() / 1000
-    const present = cookies.some((cookie) => {
+    const matchedCookieNames = cookies.filter((cookie) => {
       if (!cookie || typeof cookie.name !== 'string') return false
       if (!SESSION_COOKIE_NAME_PATTERNS[model].some((pattern) => pattern.test(cookie.name))) return false
       return cookie.session === true || (typeof cookie.expirationDate === 'number' && cookie.expirationDate > now)
-    })
-    return { available: true, sessionCookiePresent: present }
+    }).map((cookie) => cookie.name)
+    return {
+      available: true,
+      sessionCookiePresent: matchedCookieNames.length > 0,
+      matchedCookieNames,
+    }
   } catch {
-    return { available: false, sessionCookiePresent: false }
+    return { available: false, sessionCookiePresent: false, matchedCookieNames: [] }
   }
 }
 

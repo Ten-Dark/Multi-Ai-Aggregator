@@ -19,7 +19,7 @@ function createCookieInspector(cookies, available = true) {
   return runInNewContext(`${helperSource}; getProviderCookieEvidence`, { browser, Date })
 }
 
-test('cookie evidence exposes only a boolean and never cookie values', async () => {
+test('cookie evidence exposes matching names but never cookie values', async () => {
   const secret = 'must-never-leave-cookie-storage'
   const inspect = createCookieInspector([
     {
@@ -31,7 +31,11 @@ test('cookie evidence exposes only a boolean and never cookie values', async () 
   ])
 
   const result = await inspect('chatgpt', 'https://chatgpt.com/')
-  assert.deepEqual({ ...result }, { available: true, sessionCookiePresent: true })
+  assert.deepEqual({ ...result }, {
+    available: true,
+    sessionCookiePresent: true,
+    matchedCookieNames: ['__Secure-next-auth.session-token'],
+  })
   assert.equal(JSON.stringify(result).includes(secret), false)
   assert.equal(helperSource.includes('cookie.value'), false)
 })
@@ -47,13 +51,21 @@ test('expired provider session cookies are not reported as present', async () =>
   ])
 
   const result = await inspect('deepseek', 'https://chat.deepseek.com/')
-  assert.deepEqual({ ...result }, { available: true, sessionCookiePresent: false })
+  assert.deepEqual({ ...result }, {
+    available: true,
+    sessionCookiePresent: false,
+    matchedCookieNames: [],
+  })
 })
 
 test('cookie API absence degrades safely without breaking session inspection', async () => {
   const inspect = createCookieInspector([], false)
   const result = await inspect('qwen', 'https://chat.qwen.ai/')
-  assert.deepEqual({ ...result }, { available: false, sessionCookiePresent: false })
+  assert.deepEqual({ ...result, matchedCookieNames: Array.from(result.matchedCookieNames) }, {
+    available: false,
+    sessionCookiePresent: false,
+    matchedCookieNames: [],
+  })
 })
 
 
@@ -108,4 +120,48 @@ test('Qwen guest detection only considers visible login or signup controls', () 
   assert.equal(detect('chatgpt'), false)
   candidates[0].visible = false
   assert.equal(detect('qwen'), false)
+})
+
+test('Qwen diagnostics expose safe DOM and cookie metadata without URL query data', () => {
+  const automation = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const start = automation.indexOf('function isQwenAuthActionLabel(')
+  const end = automation.indexOf('function inspectPage(', start)
+  assert.notEqual(start, -1)
+  assert.notEqual(end, -1)
+  const source = automation.slice(start, end)
+  const authElements = [
+    { innerText: 'Log in', getAttribute: () => null, visible: true },
+    { innerText: 'Sign up', getAttribute: () => null, visible: false },
+  ]
+  const avatar = { visible: true }
+  const document = {
+    querySelector: () => null,
+    querySelectorAll: (selector) => {
+      if (selector === 'button, a, [role="button"]') return authElements
+      if (selector === '.account-avatar') return [avatar]
+      return []
+    },
+  }
+  const create = runInNewContext(`${source}; createQwenDiagnostics`, {
+    MODEL: 'qwen',
+    adapter: { loggedInSelectors: ['.account-avatar'] },
+    document,
+    isVisible: (element) => element.visible,
+    URL,
+  })
+  const diagnostics = create({
+    url: 'https://chat.qwen.ai/c/private-chat-id?token=must-not-appear',
+    title: 'Qwen',
+    composerVisible: true,
+    accountMenuLogoutVisible: false,
+  }, {
+    available: true,
+    matchedCookieNames: ['tongyi_sso_ticket'],
+  })
+
+  assert.equal(diagnostics.url, 'https://chat.qwen.ai/c/private-chat-id')
+  assert.deepEqual(Array.from(diagnostics.loginActions), ['Log in'])
+  assert.equal(diagnostics.profileSelectors[0].visibleMatches, 1)
+  assert.deepEqual(Array.from(diagnostics.cookieEvidence.matchedNames), ['tongyi_sso_ticket'])
+  assert.equal(JSON.stringify(diagnostics).includes('must-not-appear'), false)
 })

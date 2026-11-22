@@ -26,6 +26,7 @@ export interface SessionInfo {
   status: SessionStatus
   message: string
   url?: string
+  diagnostics?: Record<string, unknown>
 }
 
 export type TaskStatus =
