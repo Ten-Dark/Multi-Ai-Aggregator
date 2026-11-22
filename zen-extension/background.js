@@ -253,8 +253,7 @@ async function connect() {
     const closeReason = typeof event?.reason === 'string' && event.reason.trim()
       ? ` Причина: ${event.reason.slice(0, 160)}`
       : ''
-    setStatus('disconnected', `Соединение закрыто (${closeCode}).${closeReason} Повторное подключение…`)
-    scheduleReconnect()
+    scheduleReconnect(`Соединение закрыто (${closeCode}).${closeReason}`)
   })
 
   nextSocket.addEventListener('error', () => {
@@ -282,10 +281,11 @@ function abortActiveTasksOnDisconnect() {
   }
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(reason = '') {
   if (reconnectTimer) return
   const delayMs = reconnectPolicy.nextDelay()
-  setStatus('disconnected', `Соединение потеряно. Повторная попытка через ${Math.ceil(delayMs / 1000)} с.`)
+  const detail = typeof reason === 'string' && reason.trim() ? reason.trim() + ' ' : ''
+  setStatus('disconnected', detail + `Повторная попытка через ${Math.ceil(delayMs / 1000)} с.`)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     void connect()
