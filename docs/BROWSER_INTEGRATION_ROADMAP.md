@@ -164,4 +164,6 @@ macOS/Linux provider code is retained in `src/main/browser/unix-browser-discover
 
 ## Next implementation slice
 
-Validate the macOS/Linux providers on native hosts or CI, then continue with the browser-neutral connector abstraction. Do not begin multi-connector protocol changes until current bridge peer ownership and handshake behavior have been audited and captured in tests.
+Windows connection slice (implemented in this iteration): the extension now reports a stable per-installation instance UUID plus browser name/version after token authentication, and sends an application-level heartbeat every 15 seconds. The bridge validates identity metadata, requires the identity handshake within 10 seconds, marks the connector connected only while the heartbeat is fresh (45-second lease), and terminates stale authenticated peers. The UI displays the connected browser identity. This is still a single-peer bridge; it does not yet prove a process-to-extension profile match or support multiple simultaneous browser profiles.
+
+Next: add bridge-level tests for identity handshake, heartbeat expiry, replacement races, and compatibility errors; then refactor single-socket ownership into an isolated multi-connector registry. Keep macOS/Linux providers deferred until after the Windows production release.

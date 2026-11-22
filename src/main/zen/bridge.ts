@@ -21,8 +21,11 @@ import { buildSynthesisPrompt } from '../synthesis/prompt.js'
 import { isAllowedZenExtensionOrigin, isValidZenExtensionOrigin } from './origin.js'
 import {
   isZenAuthMessage,
+  isZenClientHeartbeatMessage,
+  isZenClientInfoMessage,
   isZenProgressMessage,
   isZenResponseMessage,
+  type ZenClientInfoMessage,
   type ZenProgressMessage,
   type ZenResponseMessage,
 } from './protocol.js'
@@ -33,6 +36,7 @@ const DEFAULT_PORT = 45123
 const PORT_ATTEMPTS = 12
 const AUTH_TIMEOUT_MS = 5000
 const HEARTBEAT_MS = 25_000
+const CLIENT_HEARTBEAT_TIMEOUT_MS = 45_000
 const CHECK_SESSIONS_TIMEOUT_MS = 90_000
 const RESPONSE_TIMEOUT_MS = 240_000
 const SYNTHESIS_TIMEOUT_MS = 300_000
@@ -94,6 +98,9 @@ export class ZenBridge {
   private progressModels = new Set<ModelId>()
   private pending = new Map<string, PendingCommand>()
   private heartbeat: NodeJS.Timeout | null = null
+  private clientHeartbeatAt = 0
+  private clientHandshakeTimer: NodeJS.Timeout | null = null
+  private clientInfo: Omit<ZenClientInfoMessage, 'type'> | null = null
   private alive = new WeakMap<WebSocket, boolean>()
   private commandSeq = 0
   private batchActive = false
@@ -187,8 +194,15 @@ export class ZenBridge {
     return {
       wsUrl,
       pairingCode: `${wsUrl}|${this.token}`,
-      connected: Boolean(this.socket && this.authenticated),
+      connected: Boolean(
+        this.socket && this.authenticated && this.clientHeartbeatAt > 0
+        && Date.now() - this.clientHeartbeatAt <= CLIENT_HEARTBEAT_TIMEOUT_MS,
+      ),
       extensionVersion: this.extensionVersion,
+      extensionInstanceId: this.clientInfo?.instanceId,
+      browserName: this.clientInfo?.browserName,
+      browserVersion: this.clientInfo?.browserVersion,
+      lastHeartbeatAt: this.clientHeartbeatAt || undefined,
     }
   }
 
@@ -266,6 +280,10 @@ export class ZenBridge {
 
     this.heartbeat = setInterval(() => {
       for (const socket of this.server?.clients ?? []) {
+        if (socket === this.socket && this.clientHeartbeatAt > 0 && Date.now() - this.clientHeartbeatAt > CLIENT_HEARTBEAT_TIMEOUT_MS) {
+          socket.terminate()
+          continue
+        }
         if (this.alive.get(socket) === false) {
           socket.terminate()
           continue
@@ -353,6 +371,36 @@ export class ZenBridge {
         return
       }
 
+      if (message.type === 'client-info') {
+        if (!isZenClientInfoMessage(message) || message.extensionVersion !== this.extensionVersion) {
+          socket.close(1007, 'Invalid client identity payload')
+          return
+        }
+        this.clientInfo = {
+          instanceId: message.instanceId,
+          browserName: message.browserName,
+          browserVersion: message.browserVersion,
+          extensionVersion: message.extensionVersion,
+        }
+        if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
+        this.clientHandshakeTimer = null
+        this.clientHeartbeatAt = Date.now()
+        this.setInfo({
+          status: 'running',
+          browserName: message.browserName,
+          message: `Расширение подключено: ${message.browserName} ${message.browserVersion}.`,
+        })
+        return
+      }
+      if (message.type === 'client-heartbeat') {
+        if (!isZenClientHeartbeatMessage(message) || !this.clientInfo || message.instanceId !== this.clientInfo.instanceId) {
+          socket.close(1008, 'Client heartbeat identity mismatch')
+          return
+        }
+        this.clientHeartbeatAt = Date.now()
+        this.emit({ type: 'zen-connection', connection: this.getZenConnection() })
+        return
+      }
       if (message.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }))
         return
@@ -388,6 +436,10 @@ export class ZenBridge {
         this.socket = null
         this.authenticated = false
         this.extensionVersion = undefined
+        if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
+        this.clientHandshakeTimer = null
+        this.clientInfo = null
+        this.clientHeartbeatAt = 0
         const message = 'Расширение Zen отключилось. Ожидание повторного подключения…'
         this.setInfo({ status: 'starting', browserName: 'Zen Browser', message })
         const unconfirmedCancellations = this.taskRegistry.finalizeCancelling((task) => ({
@@ -407,11 +459,14 @@ export class ZenBridge {
       // The close handler updates the application state.
     })
   }
-
   private adoptSocket(socket: WebSocket, extensionVersion: unknown): void {
     const previousSocket = this.socket
-    // Revoke the previous connection synchronously before closing it; its close event is asynchronous.
     this.socket = socket
+    this.extensionVersion = typeof extensionVersion === 'string' ? extensionVersion : undefined
+    if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
+    this.clientHandshakeTimer = null
+    this.clientInfo = null
+    this.clientHeartbeatAt = 0
     this.authenticated = true
     if (previousSocket && previousSocket !== socket) {
       try {
@@ -420,12 +475,14 @@ export class ZenBridge {
         // Ignore.
       }
     }
-    this.extensionVersion = typeof extensionVersion === 'string' ? extensionVersion : undefined
     socket.send(JSON.stringify({ type: 'auth-ok', serverVersion: '0.1.0' }))
+    this.clientHandshakeTimer = setTimeout(() => {
+      if (this.socket === socket && !this.clientInfo) socket.close(1008, 'Client identity handshake timeout')
+    }, 10_000)
     this.setInfo({
-      status: 'running',
+      status: 'starting',
       browserName: 'Zen Browser',
-      message: 'Расширение Zen подключено. Сессии проверились автоматически.',
+      message: 'Авторизация подтверждена. Проверяется экземпляр браузера…',
     })
     // Give the freshly created tabs time to load before the first check,
     // otherwise the UI would briefly show false errors for every model.
@@ -908,6 +965,8 @@ export class ZenBridge {
 
   async close(): Promise<void> {
     if (this.startPromise) await this.startPromise.catch(() => undefined)
+    if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
+    this.clientHandshakeTimer = null
     if (this.heartbeat) {
       clearInterval(this.heartbeat)
       this.heartbeat = null
@@ -924,6 +983,8 @@ export class ZenBridge {
     this.rejectPending(new BridgeError('browser', 'Приложение закрывается.'))
     this.authenticated = false
     this.socket = null
+    this.clientInfo = null
+    this.clientHeartbeatAt = 0
     const server = this.server
     this.server = null
     if (server) {

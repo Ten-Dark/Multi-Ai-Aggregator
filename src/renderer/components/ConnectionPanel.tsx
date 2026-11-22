@@ -1,6 +1,8 @@
 interface ConnectionPanelProps {
   connected: boolean
   pairingCode?: string
+  browserName?: string
+  browserVersion?: string
   copied: boolean
   onCopy: (key: string, text: string) => void
 }
@@ -8,6 +10,8 @@ interface ConnectionPanelProps {
 export function ConnectionPanel({
   connected,
   pairingCode,
+  browserName,
+  browserVersion,
   copied,
   onCopy,
 }: ConnectionPanelProps) {
@@ -21,6 +25,11 @@ export function ConnectionPanel({
               ? 'Расширение подключено и работает с вашими текущими сессиями в Zen. Код ниже нужен только в новом профиле или если автоподключение не сработало.'
               : 'Откройте Zen и вручную подключите расширение Multi-AI Aggregator Bridge с помощью кода ниже.'}
           </p>
+          {connected && browserName && (
+            <p className="hint">
+              Активный экземпляр: {browserName}{browserVersion ? ` · ${browserVersion}` : ''}
+            </p>
+          )}
         </div>
         <span className={`status-pill tone-${connected ? 'ok' : 'warn'}`}>
           {connected ? 'Подключено' : 'Не подключено'}

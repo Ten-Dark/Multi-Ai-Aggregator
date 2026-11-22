@@ -41,10 +41,12 @@ function createExtensionHarness() {
   const values = new Map()
   let runtimeListener
   const statusWrites = []
+  const intervals = []
   const browser = {
     runtime: {
-      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.3' }),
+      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.4' }),
       getURL: (path) => `moz-extension://test/${path}`,
+      getBrowserInfo: async () => ({ name: 'Zen', version: '1.2.3' }),
       onMessage: {
         addListener: (listener) => { runtimeListener = listener },
       },
@@ -74,6 +76,9 @@ function createExtensionHarness() {
     URL,
     setTimeout,
     clearTimeout,
+    setInterval: (callback, ms) => { intervals.push({ callback, ms }); return intervals.length },
+    clearInterval: () => {},
+    crypto: { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' },
     fetch: async () => ({ ok: false }),
     Promise,
     Map,
@@ -86,6 +91,7 @@ function createExtensionHarness() {
     dispatch: (message, sender = {}) => runtimeListener(message, sender),
     statusWrites,
     values,
+    intervals,
   }
 }
 
@@ -133,12 +139,26 @@ test('Zen extension pairs, authenticates and forwards progress over the bridge',
   assert.deepEqual(socket.sent[0], {
     type: 'auth',
     token: 'integration-secret',
-    extensionVersion: '0.3.3',
+    extensionVersion: '0.3.4',
   })
 
   socket.emit('message', { data: JSON.stringify({ type: 'auth-ok' }) })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(socket.sent[1], {
+    type: 'client-info',
+    instanceId: '123e4567-e89b-42d3-a456-426614174000',
+    browserName: 'Zen',
+    browserVersion: '1.2.3',
+    extensionVersion: '0.3.4',
+  })
   assert.equal(harness.statusWrites.at(-1).state, 'connected')
-
+  assert.equal(harness.values.get('maiClientInstanceId'), '123e4567-e89b-42d3-a456-426614174000')
+  assert.equal(harness.intervals[0].ms, 15_000)
+  harness.intervals[0].callback()
+  assert.deepEqual(socket.sent[2], {
+    type: 'client-heartbeat',
+    instanceId: '123e4567-e89b-42d3-a456-426614174000',
+  })
   await harness.dispatch({
     type: 'mai:progress',
     model: 'qwen',

@@ -419,15 +419,17 @@ export function useAggregatorController() {
 
   const clearPrompt = () => setPrompt('')
 
-  const browserLabel =
-    browser.status === 'running'
-      ? `Zen: подключён${zenConnection?.extensionVersion ? ` · v${zenConnection.extensionVersion}` : ''}`
-      : browser.status === 'starting'
-        ? 'Zen: ждёт расширение'
-        : browser.status === 'error'
-          ? 'Zen: ошибка моста'
-          : 'Zen: мост остановлен'
 
+  const browserLabel =
+    zenConnected
+      ? `Zen: подключён${zenConnection?.browserName ? ` · ${zenConnection.browserName}` : zenConnection?.extensionVersion ? ` · v${zenConnection.extensionVersion}` : ''}`
+      : browser.status === 'running'
+        ? 'Zen: проверка соединения'
+        : browser.status === 'starting'
+          ? 'Zen: ждёт подтверждения расширения'
+          : browser.status === 'error'
+            ? 'Zen: ошибка моста'
+            : 'Zen: мост остановлен'
   const sessionHint = MODEL_IDS.some((model) =>
     ['login-required', 'manual-action', 'blocked'].includes(sessions[model].status),
   )

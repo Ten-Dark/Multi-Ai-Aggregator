@@ -76,6 +76,8 @@ export function App() {
       <ConnectionPanel
         connected={zenConnected}
         pairingCode={zenConnection?.pairingCode}
+        browserName={zenConnection?.browserName}
+        browserVersion={zenConnection?.browserVersion}
         copied={copiedKey === 'zen-pairing'}
         onCopy={copyText}
       />

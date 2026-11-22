@@ -11,10 +11,14 @@ const PAIRING_KEY = 'maiPairing'
 const TABS_KEY = 'maiTabs'
 const STATUS_KEY = 'maiStatus'
 const RECONNECT_MS = 5000
+const CLIENT_HEARTBEAT_MS = 15_000
+const CLIENT_INSTANCE_KEY = 'maiClientInstanceId'
 const EXTENSION_VERSION = browser.runtime.getManifest().version
 
 let socket = null
 let reconnectTimer = null
+let clientHeartbeatTimer = null
+let clientIdentityPromise = null
 let authenticated = false
 let lastAuthError = ''
 let currentStatus = { state: 'idle', message: 'Код подключения не задан.' }
@@ -57,6 +61,49 @@ async function getPairing() {
 async function setPairing(code) {
   await browser.storage.local.set({ [PAIRING_KEY]: code })
 }
+async function getClientIdentity() {
+  if (!clientIdentityPromise) {
+    clientIdentityPromise = (async () => {
+      const stored = await browser.storage.local.get(CLIENT_INSTANCE_KEY)
+      let instanceId = stored[CLIENT_INSTANCE_KEY]
+      if (typeof instanceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(instanceId)) {
+        instanceId = crypto.randomUUID()
+        await browser.storage.local.set({ [CLIENT_INSTANCE_KEY]: instanceId })
+      }
+      let browserInfo = null
+      try {
+        browserInfo = await browser.runtime.getBrowserInfo()
+      } catch {
+        // Browser metadata is diagnostic only; identity remains stable without it.
+      }
+      return {
+        instanceId,
+        browserName: typeof browserInfo?.name === 'string' && browserInfo.name.trim() ? browserInfo.name.slice(0, 80) : 'Unknown browser',
+        browserVersion: typeof browserInfo?.version === 'string' ? browserInfo.version.slice(0, 80) : 'unknown',
+      }
+    })().catch((error) => {
+      clientIdentityPromise = null
+      throw error
+    })
+  }
+  return clientIdentityPromise
+}
+
+function stopClientHeartbeat() {
+  if (clientHeartbeatTimer) clearInterval(clientHeartbeatTimer)
+  clientHeartbeatTimer = null
+}
+
+async function announceClientIdentity() {
+  const identity = await getClientIdentity()
+  if (!authenticated || !sendRaw({ type: 'client-info', ...identity, extensionVersion: EXTENSION_VERSION })) return
+  stopClientHeartbeat()
+  clientHeartbeatTimer = setInterval(() => {
+    if (!authenticated || !sendRaw({ type: 'client-heartbeat', instanceId: identity.instanceId })) stopClientHeartbeat()
+  }, CLIENT_HEARTBEAT_MS)
+  setStatus('connected', `Подключено: ${identity.browserName} ${identity.browserVersion}.`)
+}
+
 
 async function applyIntegrationPairing() {
   const manifest = browser.runtime.getManifest()
@@ -163,10 +210,15 @@ async function connect() {
   nextSocket.addEventListener('close', (event) => {
     if (socket !== nextSocket) return
     authenticated = false
+    stopClientHeartbeat()
     abortActiveTasksOnDisconnect()
     if (socketAuthTimer) {
       clearTimeout(socketAuthTimer)
       socketAuthTimer = null
+    }
+    if (event && event.code === 1008 && String(event.reason || '').includes('Client identity handshake timeout')) {
+      setStatus('error', 'Расширение устарело или не поддерживает идентификацию браузера. Установите версию 0.3.4 или новее.')
+      return
     }
     if (event && event.code === 1008 && String(event.reason || '').includes('Replaced')) {
       setStatus('idle', 'Подключение заменено другим окном Zen. Перезагрузите расширение.')
@@ -226,7 +278,11 @@ function handleServerMessage(message, sourceSocket, clearSourceAuthTimer) {
     authenticated = true
     lastAuthError = ''
     clearSourceAuthTimer?.()
-    setStatus('connected', 'Подключено к Multi-AI Aggregator.')
+    setStatus('connecting', 'Авторизация подтверждена. Определение экземпляра браузера…')
+    void announceClientIdentity().catch((error) => {
+      setStatus('error', `Не удалось определить экземпляр браузера: ${error instanceof Error ? error.message : String(error)}`)
+      if (socket === sourceSocket) sourceSocket.close()
+    })
     return
   }
   if (message.type === 'auth-error') {

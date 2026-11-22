@@ -120,6 +120,10 @@ export interface ZenConnectionInfo {
   wsUrl: string
   connected: boolean
   extensionVersion?: string
+  extensionInstanceId?: string
+  browserName?: string
+  browserVersion?: string
+  lastHeartbeatAt?: number
 }
 
 export type AggregatorEvent =

@@ -8,6 +8,19 @@ export interface ZenAuthMessage {
   extensionVersion?: string
 }
 
+export interface ZenClientInfoMessage {
+  type: 'client-info'
+  instanceId: string
+  browserName: string
+  browserVersion: string
+  extensionVersion: string
+}
+
+export interface ZenClientHeartbeatMessage {
+  type: 'client-heartbeat'
+  instanceId: string
+}
+
 export interface ZenProgressMessage {
   type: 'progress'
   taskId?: string
@@ -36,6 +49,8 @@ export type ZenResponseMessage =
 
 export type ZenClientMessage =
   | ZenAuthMessage
+  | ZenClientInfoMessage
+  | ZenClientHeartbeatMessage
   | { type: 'ping' | 'pong' }
   | ZenProgressMessage
   | ZenResponseMessage
@@ -52,6 +67,18 @@ const TASK_ERROR_CODES: TaskErrorCode[] = [
   'site',
   'unknown',
 ]
+export function isZenClientInfoMessage(value: Record<string, unknown>): value is Record<string, unknown> & ZenClientInfoMessage {
+  return value.type === 'client-info'
+    && typeof value.instanceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.instanceId)
+    && typeof value.browserName === 'string' && value.browserName.length > 0 && value.browserName.length <= 80
+    && typeof value.browserVersion === 'string' && value.browserVersion.length <= 80
+    && typeof value.extensionVersion === 'string' && value.extensionVersion.length <= 64
+}
+
+export function isZenClientHeartbeatMessage(value: Record<string, unknown>): value is Record<string, unknown> & ZenClientHeartbeatMessage {
+  return value.type === 'client-heartbeat'
+    && typeof value.instanceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.instanceId)
+}
 
 const PROGRESS_PHASES: ProgressPhase[] = ['opening', 'sending', 'waiting']
 const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
