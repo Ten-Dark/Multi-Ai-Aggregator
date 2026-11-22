@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Multi-AI Aggregator Bridge",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Local bridge between Multi-AI Aggregator and ChatGPT, Qwen and DeepSeek tabs in Zen.",
   "browser_specific_settings": {
     "gecko": {

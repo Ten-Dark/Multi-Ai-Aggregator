@@ -11,11 +11,21 @@ const PAIRING_KEY = 'maiPairing'
 const TABS_KEY = 'maiTabs'
 const STATUS_KEY = 'maiStatus'
 const CLIENT_HEARTBEAT_MS = 15_000
-const reconnectPolicy = globalThis.MaiReconnectPolicy.createReconnectPolicy({
+const reconnectPolicy = globalThis.MaiReconnectPolicy?.createReconnectPolicy?.({
   baseDelayMs: 1000,
   maxDelayMs: 60_000,
   jitterRatio: 0.2,
-})
+}) || (() => {
+  let attempts = 0
+  return {
+    nextDelay() {
+      attempts += 1
+      const ceiling = Math.min(60_000, 1000 * (2 ** Math.min(attempts - 1, 6)))
+      return Math.round(ceiling * (0.8 + Math.random() * 0.4))
+    },
+    reset() { attempts = 0 },
+  }
+})()
 const CLIENT_INSTANCE_KEY = 'maiClientInstanceId'
 const EXTENSION_VERSION = browser.runtime.getManifest().version
 
@@ -239,7 +249,11 @@ async function connect() {
       })
       return
     }
-    setStatus('disconnected', 'Нет соединения с Multi-AI Aggregator. Повторное подключение…')
+    const closeCode = Number.isInteger(event?.code) ? `Код ${event.code}` : 'Код неизвестен'
+    const closeReason = typeof event?.reason === 'string' && event.reason.trim()
+      ? ` Причина: ${event.reason.slice(0, 160)}`
+      : ''
+    setStatus('disconnected', `Соединение закрыто (${closeCode}).${closeReason} Повторное подключение…`)
     scheduleReconnect()
   })
 
