@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:security
+
+      - name: Build Windows installer
+        run: npm run dist
+
+      - name: Build Zen extension
+        run: npm run build:extension
+
+      - name: Generate extension update metadata
+        run: node scripts/create-zen-update-manifest.mjs
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $xpi = Get-ChildItem 'release/zen-extension/*.xpi' | Select-Object -First 1
+          if (-not $xpi) { throw 'Zen XPI was not produced.' }
+          Copy-Item $xpi.FullName 'release/multi-ai-aggregator-zen.xpi' -Force
+          $installer = Get-ChildItem 'release/Multi-AI-Aggregator-Setup-*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows NSIS installer was not produced.' }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path ($installer.FullName + '.sha256') -Value ($hash + '  ' + $installer.Name) -NoNewline -Encoding ascii
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release/Multi-AI-Aggregator-Setup-*.exe
+            release/Multi-AI-Aggregator-Setup-*.exe.sha256
+            release/multi-ai-aggregator-zen.xpi
+            release/updates.json
+            release/zen-extension-version.txt

@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld('aggregator', {
   synthesize: (request) => ipcRenderer.invoke('aggregator:synthesize', request),
   copyText: (text) => ipcRenderer.invoke('aggregator:copyText', text),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  checkAppUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
+  downloadAppUpdate: () => ipcRenderer.invoke('app:downloadUpdate'),
   getZenConnection: () => ipcRenderer.invoke('aggregator:getZenConnection'),
   setActiveConnector: (instanceId) => ipcRenderer.invoke('aggregator:setActiveConnector', instanceId),
   setProviderConnector: (model, instanceId) => ipcRenderer.invoke('aggregator:setProviderConnector', model, instanceId),

@@ -180,3 +180,8 @@ footer p {
   color: var(--text-soft);
   font-size: 11px;
 }
+
+.update-box { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: #ffffff; }
+.update-box strong { font-size: 12px; }
+.update-box .actions { flex-wrap: wrap; }
+.update-box button { flex: 1; }

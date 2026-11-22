@@ -3,6 +3,7 @@ import { createWindow, getMainWindow } from './window.js'
 import { ZenBridge } from './zen/bridge.js'
 import { registerAggregatorIpc } from './ipc.js'
 import { BrowserDiscoveryService } from './browser/browser-discovery.js'
+import { registerUpdateIpc } from './updates.js'
 import type { AggregatorEvent } from '../shared/types.js'
 
 app.setName('Multi-AI Aggregator')
@@ -51,6 +52,8 @@ if (!gotSingleInstanceLock) {
       )
 
       const window = createWindow()
+
+      registerUpdateIpc()
 
       window.webContents.once('did-finish-load', () => {
         setTimeout(() => {

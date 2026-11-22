@@ -89,3 +89,51 @@ const refreshTimer = setInterval(() => {
 }, 1000)
 
 void refresh()
+
+const updateStatus = document.getElementById('update-status')
+const checkUpdateButton = document.getElementById('check-update')
+const downloadUpdateButton = document.getElementById('download-update')
+const RELEASE_API = 'https://api.github.com/repos/Ten-Dark/Multi-Ai-Aggregator/releases/latest'
+const EXTENSION_DOWNLOAD_URL = 'https://github.com/Ten-Dark/Multi-Ai-Aggregator/releases/latest/download/multi-ai-aggregator-zen.xpi'
+
+function compareVersions(left, right) {
+  const parse = (value) => value.replace(/^v/i, '').split(/[+-]/)[0].split('.').map(Number)
+  const a = parse(left), b = parse(right)
+  if (a.length !== 3 || b.length !== 3 || [...a, ...b].some((part) => !Number.isInteger(part))) return null
+  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1
+  return 0
+}
+
+async function checkExtensionUpdate() {
+  checkUpdateButton.disabled = true
+  downloadUpdateButton.hidden = true
+  updateStatus.textContent = 'Проверяю последнюю опубликованную версию…'
+  try {
+    const response = await fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' })
+    if (response.status === 404) throw new Error('Пока нет опубликованных релизов.')
+    if (!response.ok) throw new Error('GitHub вернул ошибку ' + response.status + '.')
+    const release = await response.json()
+    if (release.draft || release.prerelease || !Array.isArray(release.assets)) throw new Error('Стабильный релиз пока недоступен.')
+    const versionAsset = release.assets.find((asset) => asset.name === 'zen-extension-version.txt')
+    const xpiAsset = release.assets.find((asset) => asset.name === 'multi-ai-aggregator-zen.xpi')
+    if (!versionAsset || !xpiAsset) throw new Error('В релизе отсутствует пакет расширения.')
+    const versionResponse = await fetch(versionAsset.browser_download_url, { cache: 'no-store' })
+    if (!versionResponse.ok) throw new Error('Не удалось прочитать версию расширения из релиза.')
+    const latestVersion = (await versionResponse.text()).trim()
+    const currentVersion = browser.runtime.getManifest().version
+    const comparison = compareVersions(latestVersion, currentVersion)
+    if (comparison === null) throw new Error('Не удалось сравнить версии расширения.')
+    if (comparison <= 0) { updateStatus.textContent = 'Установлена актуальная версия ' + currentVersion + '.'; return }
+    updateStatus.textContent = 'Доступна версия ' + latestVersion + ' (установлена ' + currentVersion + '). Нажми «Скачать XPI», затем подтверди установку в Zen.'
+    downloadUpdateButton.hidden = false
+  } catch (error) { updateStatus.textContent = error instanceof Error ? error.message : String(error) }
+  finally { checkUpdateButton.disabled = false }
+}
+
+checkUpdateButton.addEventListener('click', () => void checkExtensionUpdate())
+downloadUpdateButton.addEventListener('click', async () => {
+  try {
+    await browser.tabs.create({ url: EXTENSION_DOWNLOAD_URL })
+    updateStatus.textContent = 'Открыл загрузку XPI. Заверши установку расширения в Zen.'
+  } catch (error) { updateStatus.textContent = error instanceof Error ? error.message : String(error) }
+})

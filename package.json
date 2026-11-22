@@ -1,6 +1,6 @@
 {
   "name": "multi-ai-aggregator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Local Electron app that queries ChatGPT, Qwen and DeepSeek and synthesizes their answers",
   "main": "dist-electron/main/main.js",
@@ -60,6 +60,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "artifactName": "Multi-AI-Aggregator-Setup-${version}.${ext}"
   }
 }

@@ -1,5 +1,6 @@
 import { MODEL_IDS, MODEL_LABELS, type ModelId } from '../shared/types'
 import { ModelResponseCard } from './components/ModelResponseCard'
+import { AppUpdatePanel } from './components/AppUpdatePanel'
 import { QueryPanel } from './components/QueryPanel'
 import { ConnectionPanel } from './components/ConnectionPanel'
 import { BrowserDiscoveryPanel } from './components/BrowserDiscoveryPanel'
@@ -42,6 +43,7 @@ export function App() {
       </header>
 
       <BrowserDiscoveryPanel />
+      <AppUpdatePanel />
 
       <section className="session-strip" aria-label="Состояние сессий">
         {MODEL_IDS.map((model) => {

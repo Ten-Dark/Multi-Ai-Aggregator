@@ -145,6 +145,19 @@ export type AggregatorEvent =
   | { type: 'session'; session: SessionInfo }
   | { type: 'model'; result: ModelResult }
   | { type: 'zen-connection'; connection: ZenConnectionInfo }
+export interface AppUpdateCheck {
+  currentVersion: string
+  latestVersion?: string
+  updateAvailable: boolean
+  message: string
+  releaseUrl?: string
+  releaseNotes?: string
+}
+
+export interface AppUpdateResult {
+  success: boolean
+  message: string
+}
 
 export interface AggregatorApi {
   getBrowserInfo: () => Promise<BrowserInfo>
@@ -159,6 +172,8 @@ export interface AggregatorApi {
   synthesize: (request: SynthesisRequest) => Promise<SynthesisResult>
   copyText: (text: string) => Promise<void>
   getAppVersion: () => Promise<string>
+  checkAppUpdate: () => Promise<AppUpdateCheck>
+  downloadAppUpdate: () => Promise<AppUpdateResult>
   getZenConnection: () => Promise<ZenConnectionInfo>
   setActiveConnector: (instanceId: string) => Promise<ZenConnectionInfo>
   setProviderConnector: (model: ModelId, instanceId: string | null) => Promise<ZenConnectionInfo>

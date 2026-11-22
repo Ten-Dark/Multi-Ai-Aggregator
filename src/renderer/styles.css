@@ -787,3 +787,22 @@ select {
     flex-direction: column;
   }
 }
+
+.update-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.update-panel-copy { min-width: 0; }
+.update-panel-title, .update-panel-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.update-panel-title strong { font-size: 13px; }
+.update-version { color: var(--text-soft); font-size: 11px; }
+.update-panel p { margin: 3px 0 0; color: var(--text-soft); font-size: 12px; }
+@media (max-width: 700px) { .update-panel { align-items: stretch; flex-direction: column; } }
