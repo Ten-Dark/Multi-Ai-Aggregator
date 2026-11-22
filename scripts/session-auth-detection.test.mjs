@@ -69,3 +69,43 @@ test('extension manifest requests cookies permission and session UI distinguishe
   assert.ok(automation.includes("status: 'session-available'"))
   assert.ok(ui.includes("'session-available': 'Сессия обнаружена'"))
 })
+
+test('Qwen login and signup actions are explicit guest-session evidence', () => {
+  const automation = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const start = automation.indexOf('function isQwenAuthActionLabel(')
+  const end = automation.indexOf('function hasVisibleQwenAuthAction(', start)
+  assert.notEqual(start, -1)
+  assert.notEqual(end, -1)
+  const isAuthActionLabel = runInNewContext(`${automation.slice(start, end)}; isQwenAuthActionLabel`)
+
+  for (const label of ['Log in', 'Sign up', '登录', '注册']) {
+    assert.equal(isAuthActionLabel(label), true, label)
+  }
+  for (const label of ['Log out', 'Sign out', 'Qwen', 'Send', 'Create a chat']) {
+    assert.equal(isAuthActionLabel(label), false, label)
+  }
+})
+
+test('Qwen guest detection only considers visible login or signup controls', () => {
+  const automation = readFileSync(new URL('../zen-extension/content/automation.js', import.meta.url), 'utf8')
+  const start = automation.indexOf('function isQwenAuthActionLabel(')
+  const end = automation.indexOf('function inspectPage(', start)
+  assert.notEqual(start, -1)
+  assert.notEqual(end, -1)
+  const source = automation.slice(start, end)
+  const candidates = [
+    { innerText: 'Log in', getAttribute: () => null, visible: true },
+    { innerText: 'Sign up', getAttribute: () => null, visible: false },
+    { innerText: 'Send', getAttribute: () => null, visible: true },
+  ]
+  const detect = (model) => runInNewContext(`${source}; hasVisibleQwenAuthAction`, {
+    MODEL: model,
+    document: { querySelectorAll: () => candidates },
+    isVisible: (element) => element.visible,
+  })()
+
+  assert.equal(detect('qwen'), true)
+  assert.equal(detect('chatgpt'), false)
+  candidates[0].visible = false
+  assert.equal(detect('qwen'), false)
+})

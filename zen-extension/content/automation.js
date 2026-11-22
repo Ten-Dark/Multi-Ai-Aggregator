@@ -284,6 +284,20 @@
     return texts
   }
 
+  function isQwenAuthActionLabel(value) {
+    const label = String(value || '').replace(/\s+/g, ' ').trim()
+    return /^(?:log in|sign up|登录|注册)$/i.test(label)
+  }
+
+  function hasVisibleQwenAuthAction() {
+    if (MODEL !== 'qwen') return false
+    const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+    return candidates.some((element) => {
+      if (!isVisible(element)) return false
+      return isQwenAuthActionLabel(element.innerText || element.getAttribute('aria-label') || '')
+    })
+  }
+
   function inspectPage() {
     return {
       url: location.href,
@@ -292,7 +306,7 @@
       dialogTexts: dialogTexts(),
       composerVisible: anyVisible(adapter.composerSelectors),
       loginFormVisible: anyVisible(adapter.loginFormSelectors),
-      loggedOutVisible: anyVisible(adapter.loggedOutSelectors),
+      loggedOutVisible: anyVisible(adapter.loggedOutSelectors) || hasVisibleQwenAuthAction(),
       loggedInVisible: anyVisible(adapter.loggedInSelectors),
       accountMenuLogoutVisible: /(?:выйти из системы|выйти из аккаунта|log\s*out|sign\s*out)/i.test(document.body?.innerText || ''),
     }
