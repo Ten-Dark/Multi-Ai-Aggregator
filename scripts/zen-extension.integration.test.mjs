@@ -69,8 +69,9 @@ function createExtensionHarness() {
       setTitle: async () => {},
     },
   }
+  const policySource = readFileSync(new URL('../zen-extension/reconnect-policy.js', import.meta.url), 'utf8')
   const source = readFileSync(new URL('../zen-extension/background.js', import.meta.url), 'utf8')
-  runInNewContext(source, {
+  const context = {
     browser,
     WebSocket: MockWebSocket,
     URL,
@@ -86,7 +87,9 @@ function createExtensionHarness() {
     Boolean,
     Error,
     JSON,
-  })
+  }
+  runInNewContext(policySource, context)
+  runInNewContext(source, context)
   return {
     dispatch: (message, sender = {}) => runtimeListener(message, sender),
     statusWrites,

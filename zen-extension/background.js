@@ -10,8 +10,12 @@ const ADAPTERS = {
 const PAIRING_KEY = 'maiPairing'
 const TABS_KEY = 'maiTabs'
 const STATUS_KEY = 'maiStatus'
-const RECONNECT_MS = 5000
 const CLIENT_HEARTBEAT_MS = 15_000
+const reconnectPolicy = globalThis.MaiReconnectPolicy.createReconnectPolicy({
+  baseDelayMs: 1000,
+  maxDelayMs: 60_000,
+  jitterRatio: 0.2,
+})
 const CLIENT_INSTANCE_KEY = 'maiClientInstanceId'
 const EXTENSION_VERSION = browser.runtime.getManifest().version
 
@@ -101,6 +105,7 @@ async function announceClientIdentity() {
   clientHeartbeatTimer = setInterval(() => {
     if (!authenticated || !sendRaw({ type: 'client-heartbeat', instanceId: identity.instanceId })) stopClientHeartbeat()
   }, CLIENT_HEARTBEAT_MS)
+  reconnectPolicy.reset()
   setStatus('connected', `Подключено: ${identity.browserName} ${identity.browserVersion}.`)
 }
 
@@ -265,10 +270,12 @@ function abortActiveTasksOnDisconnect() {
 
 function scheduleReconnect() {
   if (reconnectTimer) return
+  const delayMs = reconnectPolicy.nextDelay()
+  setStatus('disconnected', `Соединение потеряно. Повторная попытка через ${Math.ceil(delayMs / 1000)} с.`)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     void connect()
-  }, RECONNECT_MS)
+  }, delayMs)
 }
 
 function handleServerMessage(message, sourceSocket, clearSourceAuthTimer) {

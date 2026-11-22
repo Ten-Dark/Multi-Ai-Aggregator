@@ -23,7 +23,7 @@
     "https://chat.deepseek.com/*"
   ],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["reconnect-policy.js", "background.js"],
     "persistent": true
   },
   "browser_action": {

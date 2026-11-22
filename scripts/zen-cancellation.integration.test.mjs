@@ -101,8 +101,9 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
   }
 
   values.set('maiTabs', { windowId: 1, tabs: { chatgpt: 101, qwen: 101, deepseek: 101 } })
+  const policySource = readFileSync(new URL('../zen-extension/reconnect-policy.js', import.meta.url), 'utf8')
   const source = readFileSync(new URL('../zen-extension/background.js', import.meta.url), 'utf8')
-  runInNewContext(source, {
+  const context = {
     browser,
     WebSocket: MockWebSocket,
     URL,
@@ -124,7 +125,9 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
     Math,
     Array,
     RegExp,
-  })
+  }
+  runInNewContext(policySource, context)
+  runInNewContext(source, context)
 
   return {
     values,
