@@ -74,6 +74,16 @@ test('confirmed cancellation wins over a late model response', async (t) => {
   })
   socket.send(JSON.stringify({ type: 'auth', token, extensionVersion: 'test' }))
   await waitForMessage(socket, (message) => message.type === 'auth-ok')
+  const ready = waitForMessage(socket, (message) => message.type === 'pong')
+  socket.send(JSON.stringify({
+    type: 'client-info',
+    instanceId: '123e4567-e89b-42d3-a456-426614174000',
+    browserName: 'Zen Browser',
+    browserVersion: '1.0.0',
+    extensionVersion: 'test',
+  }))
+  socket.send(JSON.stringify({ type: 'ping' }))
+  await ready
 
   const operation = bridge.sendOne('chatgpt', 'test prompt')
   const sendCommand = await waitForMessage(
@@ -164,6 +174,16 @@ test('batch cancellation preserves completed children and cancels only active ta
   })
   socket.send(JSON.stringify({ type: 'auth', token, extensionVersion: 'test' }))
   await waitForMessage(socket, (message) => message.type === 'auth-ok')
+  const ready = waitForMessage(socket, (message) => message.type === 'pong')
+  socket.send(JSON.stringify({
+    type: 'client-info',
+    instanceId: '123e4567-e89b-42d3-a456-426614174000',
+    browserName: 'Zen Browser',
+    browserVersion: '1.0.0',
+    extensionVersion: 'test',
+  }))
+  socket.send(JSON.stringify({ type: 'ping' }))
+  await ready
 
   const observedCommands = []
   const observeCommands = (raw) => observedCommands.push(JSON.parse(raw.toString()))

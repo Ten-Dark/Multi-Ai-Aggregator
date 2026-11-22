@@ -52,6 +52,19 @@ if ($env:MAI_PRIVATE_FILE -and (Test-Path -LiteralPath $env:MAI_PRIVATE_FILE)) {
 Write-Output 'ACL_OK'
 `
 
+function windowsPowerShellEnvironment(): NodeJS.ProcessEnv {
+  const windowsRoot = process.env.SystemRoot || 'C:\\Windows'
+  const modulePaths = [
+    path.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WindowsPowerShell', 'Modules'),
+  ]
+  return {
+    ...process.env,
+    // Do not let PowerShell 7 module paths shadow Windows PowerShell 5.1 modules.
+    PSModulePath: modulePaths.join(path.delimiter),
+  }
+}
+
 function currentWindowsUserSid(): string {
   const windowsRoot = process.env.SystemRoot || 'C:\\Windows'
   const output = execFileSync(path.join(windowsRoot, 'System32', 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], {
@@ -83,7 +96,7 @@ export function securePrivateDirectory(directory: string): void {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env,
+        ...windowsPowerShellEnvironment(),
         MAI_PRIVATE_DIR: directory,
         MAI_PRIVATE_FILE: '',
         MAI_APPLY_DIR: '1',
@@ -108,7 +121,7 @@ export function securePrivateFile(filePath: string, directory: string): void {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env,
+        ...windowsPowerShellEnvironment(),
         MAI_PRIVATE_DIR: directory,
         MAI_PRIVATE_FILE: filePath,
         MAI_APPLY_DIR: '0',

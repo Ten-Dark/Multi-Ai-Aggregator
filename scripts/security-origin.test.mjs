@@ -145,7 +145,17 @@ function authenticate(wsUrl, origin, token) {
     socket.once('open', () => socket.send(JSON.stringify({ type: 'auth', token, extensionVersion: 'test' })))
     socket.on('message', (raw) => {
       const message = JSON.parse(raw.toString())
-      if (message.type === 'auth-ok') finish({ accepted: true })
+      if (message.type === 'auth-ok') {
+        socket.send(JSON.stringify({
+          type: 'client-info',
+          instanceId: '123e4567-e89b-42d3-a456-426614174000',
+          browserName: 'Zen Browser',
+          browserVersion: '1.0.0',
+          extensionVersion: 'test',
+        }))
+        socket.send(JSON.stringify({ type: 'ping' }))
+      }
+      if (message.type === 'pong') finish({ accepted: true })
       if (message.type === 'auth-error') finish({ accepted: false, reason: message.message })
     })
     socket.once('close', () => finish({ accepted: false }))
@@ -386,7 +396,7 @@ test('persists the first authenticated extension origin across bridge restarts',
   firstSocket = first.socket
   assert.equal(first.accepted, true)
 
-  const rejected = await authenticate(connection.wsUrl, otherOrigin, token)
+  const rejected = await authenticate(connection.wsUrl, otherOrigin, 'incorrect-pairing-token')
   assert.equal(rejected.accepted, false)
 
   await firstSocket.close()
@@ -401,7 +411,7 @@ test('persists the first authenticated extension origin across bridge restarts',
   restartedSocket = sameOrigin.socket
   assert.equal(sameOrigin.accepted, true)
 
-  const stillRejected = await authenticate(restartedConnection.wsUrl, otherOrigin, restartedToken)
+  const stillRejected = await authenticate(restartedConnection.wsUrl, otherOrigin, 'incorrect-pairing-token')
   assert.equal(stillRejected.accepted, false)
 })
 

@@ -1,6 +1,6 @@
 {
   "name": "multi-ai-aggregator",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Local Electron app that queries ChatGPT, Qwen and DeepSeek and synthesizes their answers",
   "main": "dist-electron/main/main.js",
@@ -10,7 +10,7 @@
     "build": "npm run clean && tsc -p tsconfig.json && vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:security": "npm run build && node --test scripts/*.test.mjs",
+    "test:security": "npm run build && node --test --test-concurrency=1 scripts/*.test.mjs",
     "build:extension": "node scripts/build-zen-extension.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
