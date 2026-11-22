@@ -626,6 +626,34 @@ select {
   margin: 5px 0 0;
 }
 
+.connector-list {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+  margin-top: 12px;
+}
+
+.connector-list label {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.connector-list select {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: var(--panel-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.connector-list .hint {
+  max-width: 480px;
+  font-size: 11px;
+}
+
 .pairing-code-row {
   display: flex;
   align-items: stretch;

@@ -234,6 +234,17 @@ export function useAggregatorController() {
     }
   }, [applyModelResult, refreshSessions])
 
+  const selectConnector = async (instanceId: string) => {
+    setGlobalError('')
+    try {
+      const connection = await window.aggregator.setActiveConnector(instanceId)
+      setZenConnection(connection)
+      await refreshSessions()
+    } catch (error) {
+      setGlobalError(cleanError(error))
+    }
+  }
+
   const openBrowser = async () => {
     setGlobalError('')
     try {
@@ -443,7 +454,7 @@ export function useAggregatorController() {
     prompt, setPrompt, lastSubmittedPrompt, results, sessions, browser, zenConnection,
     zenConnected, sending, checkingSessions, synthesizing, synthModel, setSynthModel,
     synthText, synthError, globalError, copiedKey, busy, refreshSessions,
-    openBrowser, focusModel, handleSubmit, retryModel, cancelModel, cancelBatch, canCancelBatch, handleSynthesize,
+    openBrowser, selectConnector, focusModel, handleSubmit, retryModel, cancelModel, cancelBatch, canCancelBatch, handleSynthesize,
     copyText, clearPrompt, browserLabel, sessionHint, doneCount,
     SESSION_TONE, SESSION_LABELS, TASK_TONE, TASK_LABELS, IN_PROGRESS,
   }

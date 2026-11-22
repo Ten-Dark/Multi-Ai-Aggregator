@@ -1,8 +1,13 @@
+import type { ZenConnectorInfo } from '../../shared/types'
+
 interface ConnectionPanelProps {
   connected: boolean
   pairingCode?: string
   browserName?: string
   browserVersion?: string
+  connectors: ZenConnectorInfo[]
+  activeConnectorId?: string
+  onSelectConnector: (instanceId: string) => void
   copied: boolean
   onCopy: (key: string, text: string) => void
 }
@@ -12,6 +17,9 @@ export function ConnectionPanel({
   pairingCode,
   browserName,
   browserVersion,
+  connectors,
+  activeConnectorId,
+  onSelectConnector,
   copied,
   onCopy,
 }: ConnectionPanelProps) {
@@ -29,6 +37,24 @@ export function ConnectionPanel({
             <p className="hint">
               Активный экземпляр: {browserName}{browserVersion ? ` · ${browserVersion}` : ''}
             </p>
+          )}
+          {connectors.length > 0 && (
+            <div className="connector-list">
+              <label htmlFor="active-connector">Активный профиль</label>
+              <select
+                id="active-connector"
+                value={activeConnectorId ?? ''}
+                onChange={(event) => onSelectConnector(event.target.value)}
+              >
+                {connectors.map((connector) => (
+                  <option key={connector.instanceId} value={connector.instanceId}>
+                    {connector.browserName} · {connector.instanceId.slice(0, 8)}
+                    {connector.active ? ' (активный)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="hint">Профили различаются по идентификатору расширения. Путь и имя профиля браузера пока не определяются.</p>
+            </div>
           )}
         </div>
         <span className={`status-pill tone-${connected ? 'ok' : 'warn'}`}>

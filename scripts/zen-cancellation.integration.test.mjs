@@ -50,8 +50,9 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
   ])
   const browser = {
     runtime: {
-      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.0' }),
+      getManifest: () => ({ name: 'Multi-AI Aggregator Bridge', version: '0.3.4' }),
       getURL: (path) => `moz-extension://test/${path}`,
+      getBrowserInfo: async () => ({ name: 'Zen', version: '1.2.3' }),
       onMessage: { addListener: (listener) => { runtimeListener = listener } },
     },
     storage: {
@@ -108,6 +109,9 @@ function createBackgroundHarness({ completeImmediately = false } = {}) {
     AbortController,
     setTimeout,
     clearTimeout,
+    setInterval: () => 0,
+    clearInterval: () => {},
+    crypto: { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' },
     fetch: async () => ({ ok: false }),
     Date,
     Promise,
@@ -145,6 +149,8 @@ async function connectBackground(harness) {
   socket.readyState = MockWebSocket.OPEN
   socket.emit('open')
   socket.emit('message', { data: JSON.stringify({ type: 'auth-ok' }) })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(socket.sent.some((message) => message.type === 'client-info'))
   return socket
 }
 

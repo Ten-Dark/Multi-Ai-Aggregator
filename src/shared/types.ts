@@ -115,6 +115,16 @@ export interface SynthesisResult {
   text: string
 }
 
+export interface ZenConnectorInfo {
+  instanceId: string
+  browserName: string
+  browserVersion: string
+  extensionVersion: string
+  connectedAt: number
+  lastHeartbeatAt: number
+  active: boolean
+}
+
 export interface ZenConnectionInfo {
   pairingCode: string
   wsUrl: string
@@ -124,6 +134,8 @@ export interface ZenConnectionInfo {
   browserName?: string
   browserVersion?: string
   lastHeartbeatAt?: number
+  activeConnectorId?: string
+  connectors?: ZenConnectorInfo[]
 }
 
 export type AggregatorEvent =
@@ -146,5 +158,6 @@ export interface AggregatorApi {
   copyText: (text: string) => Promise<void>
   getAppVersion: () => Promise<string>
   getZenConnection: () => Promise<ZenConnectionInfo>
+  setActiveConnector: (instanceId: string) => Promise<ZenConnectionInfo>
   onEvent: (callback: (event: AggregatorEvent) => void) => () => void
 }

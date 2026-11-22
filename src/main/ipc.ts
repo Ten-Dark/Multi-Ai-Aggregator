@@ -120,6 +120,14 @@ export function registerAggregatorIpc(
     return getBridge().getZenConnection()
   })
 
+  ipcMain.handle('aggregator:setActiveConnector', async (event, instanceId: unknown) => {
+    assertTrustedSender(event)
+    if (typeof instanceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(instanceId)) {
+      throw new Error('Некорректный идентификатор профиля браузера.')
+    }
+    return getBridge().setActiveConnector(instanceId)
+  })
+
   ipcMain.handle('aggregator:launchBrowser', async (event) => {
     assertTrustedSender(event)
     return getBridge().openBrowser()

@@ -11,7 +11,7 @@ export function App() {
     prompt, setPrompt, lastSubmittedPrompt, results, sessions, browser, zenConnection,
     zenConnected, sending, checkingSessions, synthesizing, synthModel, setSynthModel,
     synthText, synthError, globalError, copiedKey, busy, refreshSessions,
-    openBrowser, focusModel, handleSubmit, retryModel, cancelModel, cancelBatch, canCancelBatch, handleSynthesize,
+    openBrowser, selectConnector, focusModel, handleSubmit, retryModel, cancelModel, cancelBatch, canCancelBatch, handleSynthesize,
     copyText, clearPrompt, browserLabel, sessionHint, doneCount,
     SESSION_TONE, SESSION_LABELS, TASK_TONE, TASK_LABELS, IN_PROGRESS,
   } = useAggregatorController()
@@ -78,6 +78,9 @@ export function App() {
         pairingCode={zenConnection?.pairingCode}
         browserName={zenConnection?.browserName}
         browserVersion={zenConnection?.browserVersion}
+        connectors={zenConnection?.connectors ?? []}
+        activeConnectorId={zenConnection?.activeConnectorId}
+        onSelectConnector={selectConnector}
         copied={copiedKey === 'zen-pairing'}
         onCopy={copyText}
       />

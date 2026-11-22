@@ -16,6 +16,7 @@ import {
   type TaskErrorCode,
   type TaskId,
   type ZenConnectionInfo,
+  type ZenConnectorInfo,
 } from '../../shared/types.js'
 import { buildSynthesisPrompt } from '../synthesis/prompt.js'
 import { isAllowedZenExtensionOrigin, isValidZenExtensionOrigin } from './origin.js'
@@ -30,6 +31,7 @@ import {
   type ZenResponseMessage,
 } from './protocol.js'
 import { TaskRegistry, type ActiveTask } from './task-registry.js'
+import { ZenConnectorRegistry } from './connector-registry.js'
 import { securePrivateDirectory, securePrivateFile } from './secure-storage.js'
 
 const DEFAULT_PORT = 45123
@@ -43,7 +45,13 @@ const SYNTHESIS_TIMEOUT_MS = 300_000
 const COMMAND_GRACE_MS = 30_000
 type EmitFn = (event: AggregatorEvent) => void
 
+interface ZenBridgeStorageSecurity {
+  secureDirectory: (directory: string) => void
+  secureFile: (filePath: string, directory: string) => void
+}
+
 interface PendingCommand {
+  socket: WebSocket
   resolve: (data: unknown) => void
   reject: (error: Error) => void
   timer: NodeJS.Timeout
@@ -94,12 +102,15 @@ export class ZenBridge {
   private startPromise: Promise<BrowserInfo> | null = null
   private info: BrowserInfo = { status: 'stopped', browserName: 'Zen Browser' }
   private readonly taskRegistry = new TaskRegistry()
+  private readonly connectors = new ZenConnectorRegistry<WebSocket>()
+  private readonly handshakeTimers = new Map<WebSocket, NodeJS.Timeout>()
+  private readonly authenticatedVersions = new Map<WebSocket, string | undefined>()
   private running = new Set<ModelId>()
   private progressModels = new Set<ModelId>()
   private pending = new Map<string, PendingCommand>()
   private heartbeat: NodeJS.Timeout | null = null
   private clientHeartbeatAt = 0
-  private clientHandshakeTimer: NodeJS.Timeout | null = null
+
   private clientInfo: Omit<ZenClientInfoMessage, 'type'> | null = null
   private alive = new WeakMap<WebSocket, boolean>()
   private commandSeq = 0
@@ -110,6 +121,10 @@ export class ZenBridge {
   constructor(
     private readonly dataDir: string,
     private readonly emit: EmitFn,
+    private readonly storageSecurity: ZenBridgeStorageSecurity = {
+      secureDirectory: securePrivateDirectory,
+      secureFile: securePrivateFile,
+    },
   ) {
     this.secureDir = path.join(dataDir, 'zen-secure')
     this.tokenFile = path.join(this.secureDir, 'zen-bridge-token')
@@ -152,10 +167,10 @@ export class ZenBridge {
   }
 
   private loadOrCreateToken(): string {
-    securePrivateDirectory(this.secureDir)
+    this.storageSecurity.secureDirectory(this.secureDir)
     let existingToken: string | null = null
     try {
-      securePrivateFile(this.tokenFile, this.secureDir)
+      this.storageSecurity.secureFile(this.tokenFile, this.secureDir)
       const existing = fs.readFileSync(this.tokenFile, 'utf8').trim()
       if (existing.length >= 24) existingToken = existing
     } catch (error) {
@@ -164,7 +179,7 @@ export class ZenBridge {
     const token = existingToken ?? randomBytes(32).toString('base64url')
     if (!existingToken) {
       fs.writeFileSync(this.tokenFile, token, { encoding: 'utf8', mode: 0o600, flag: 'w' })
-      securePrivateFile(this.tokenFile, this.secureDir)
+      this.storageSecurity.secureFile(this.tokenFile, this.secureDir)
     }
 
     // The legacy token lived directly under userData and inherited its broad DACL.
@@ -191,19 +206,55 @@ export class ZenBridge {
   getZenConnection(): ZenConnectionInfo {
     const port = this.port || Number(process.env.AGGREGATOR_ZEN_PORT) || DEFAULT_PORT
     const wsUrl = `ws://127.0.0.1:${port}`
+    const active = this.connectors.getActive()
+    const connectors: ZenConnectorInfo[] = this.connectors.list().map((connector) => ({
+      instanceId: connector.instanceId,
+      browserName: connector.browserName,
+      browserVersion: connector.browserVersion,
+      extensionVersion: connector.extensionVersion,
+      connectedAt: connector.connectedAt,
+      lastHeartbeatAt: connector.lastHeartbeatAt,
+      active: connector.instanceId === active?.instanceId,
+    }))
     return {
       wsUrl,
       pairingCode: `${wsUrl}|${this.token}`,
-      connected: Boolean(
-        this.socket && this.authenticated && this.clientHeartbeatAt > 0
-        && Date.now() - this.clientHeartbeatAt <= CLIENT_HEARTBEAT_TIMEOUT_MS,
-      ),
-      extensionVersion: this.extensionVersion,
-      extensionInstanceId: this.clientInfo?.instanceId,
-      browserName: this.clientInfo?.browserName,
-      browserVersion: this.clientInfo?.browserVersion,
-      lastHeartbeatAt: this.clientHeartbeatAt || undefined,
+      connected: Boolean(active && this.connectors.isFresh(active, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)
+        && active.transport.readyState === WebSocket.OPEN),
+      extensionVersion: active?.extensionVersion,
+      extensionInstanceId: active?.instanceId,
+      browserName: active?.browserName,
+      browserVersion: active?.browserVersion,
+      lastHeartbeatAt: active?.lastHeartbeatAt,
+      activeConnectorId: active?.instanceId,
+      connectors,
     }
+  }
+
+  setActiveConnector(instanceId: string): ZenConnectionInfo {
+    const target = this.connectors.get(instanceId)
+    if (!target || target.transport.readyState !== WebSocket.OPEN
+      || !this.connectors.isFresh(target, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
+      throw new BridgeError('browser', 'Выбранный профиль браузера больше не подключён или не отвечает.')
+    }
+    if (this.connectors.getActive()?.instanceId !== instanceId
+      && (this.pending.size > 0 || this.running.size > 0 || this.batchActive || this.synthesisActive || this.sessionCheck)) {
+      throw new BridgeError('busy', 'Нельзя переключить профиль, пока выполняются команды. Дождитесь завершения текущих операций.')
+    }
+    if (!this.connectors.setActive(instanceId)) {
+      throw new BridgeError('browser', 'Выбранный профиль браузера больше не подключён.')
+    }
+    this.syncActiveConnector()
+    const active = this.connectors.getActive()
+    this.setInfo({
+      status: 'running',
+      browserName: active?.browserName ?? 'Zen Browser',
+      message: 'Активный профиль браузера изменён.',
+    })
+    void this.checkSessions().catch((error: unknown) => {
+      console.error('[zen-bridge] Session check after connector selection failed:', error)
+    })
+    return this.getZenConnection()
   }
 
   async start(): Promise<BrowserInfo> {
@@ -280,10 +331,12 @@ export class ZenBridge {
 
     this.heartbeat = setInterval(() => {
       for (const socket of this.server?.clients ?? []) {
-        if (socket === this.socket && this.clientHeartbeatAt > 0 && Date.now() - this.clientHeartbeatAt > CLIENT_HEARTBEAT_TIMEOUT_MS) {
+        const connector = this.connectors.getByTransport(socket)
+        if (connector && !this.connectors.isFresh(connector, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
           socket.terminate()
           continue
         }
+
         if (this.alive.get(socket) === false) {
           socket.terminate()
           continue
@@ -366,38 +419,60 @@ export class ZenBridge {
         return
       }
 
-      if (socket !== this.socket || !this.authenticated) {
-        socket.close(1008, 'Connection has been replaced')
-        return
-      }
-
       if (message.type === 'client-info') {
-        if (!isZenClientInfoMessage(message) || message.extensionVersion !== this.extensionVersion) {
+        const expectedVersion = this.authenticatedVersions.get(socket)
+        if (!isZenClientInfoMessage(message) || message.extensionVersion !== expectedVersion) {
           socket.close(1007, 'Invalid client identity payload')
           return
         }
-        this.clientInfo = {
+        const registration = this.connectors.register({
           instanceId: message.instanceId,
           browserName: message.browserName,
           browserVersion: message.browserVersion,
           extensionVersion: message.extensionVersion,
+        }, socket)
+        const handshakeTimer = this.handshakeTimers.get(socket)
+        if (handshakeTimer) clearTimeout(handshakeTimer)
+        this.handshakeTimers.delete(socket)
+        this.authenticatedVersions.delete(socket)
+        if (registration.replacedTransport && registration.replacedTransport !== socket) {
+          registration.replacedTransport.close(1008, 'Reconnected from the same browser profile')
         }
-        if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
-        this.clientHandshakeTimer = null
-        this.clientHeartbeatAt = Date.now()
-        this.setInfo({
-          status: 'running',
-          browserName: message.browserName,
-          message: `Расширение подключено: ${message.browserName} ${message.browserVersion}.`,
-        })
+        this.syncActiveConnector()
+        if (this.connectors.getActive()?.transport === socket) {
+          this.setInfo({
+            status: 'running',
+            browserName: message.browserName,
+            message: `Подключён профиль: ${message.browserName} ${message.browserVersion}.`,
+          })
+          setTimeout(() => {
+            if (this.connectors.getActive()?.transport !== socket) return
+            void this.checkSessions().catch((error: unknown) => {
+              console.error('[zen-bridge] Automatic session check failed:', error)
+            })
+          }, 3500)
+        } else {
+          this.emit({ type: 'zen-connection', connection: this.getZenConnection() })
+        }
         return
       }
+
+      const connector = this.connectors.getByTransport(socket)
+      if (!connector) {
+        socket.close(1008, 'Client identity handshake required')
+        return
+      }
+
+
       if (message.type === 'client-heartbeat') {
-        if (!isZenClientHeartbeatMessage(message) || !this.clientInfo || message.instanceId !== this.clientInfo.instanceId) {
+        if (!isZenClientHeartbeatMessage(message)
+          || !this.connectors.heartbeat(socket, message.instanceId)) {
           socket.close(1008, 'Client heartbeat identity mismatch')
           return
         }
-        this.clientHeartbeatAt = Date.now()
+        if (this.connectors.getActive()?.transport === socket) {
+          this.clientHeartbeatAt = connector.lastHeartbeatAt
+        }
         this.emit({ type: 'zen-connection', connection: this.getZenConnection() })
         return
       }
@@ -411,7 +486,7 @@ export class ZenBridge {
           socket.close(1007, 'Invalid progress payload')
           return
         }
-        this.handleProgress(message)
+        if (this.connectors.getActive()?.transport === socket) this.handleProgress(message)
         return
       }
       if (message.type === 'response') {
@@ -419,7 +494,7 @@ export class ZenBridge {
           socket.close(1007, 'Invalid response payload')
           return
         }
-        this.handleResponse(message)
+        this.handleResponse(message, socket)
         return
       }
       socket.close(1008, 'Unsupported message type')
@@ -432,26 +507,49 @@ export class ZenBridge {
     socket.on('close', () => {
       clearTimeout(authTimer)
       this.alive.delete(socket)
-      if (this.socket === socket) {
-        this.socket = null
-        this.authenticated = false
-        this.extensionVersion = undefined
-        if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
-        this.clientHandshakeTimer = null
-        this.clientInfo = null
-        this.clientHeartbeatAt = 0
-        const message = 'Расширение Zen отключилось. Ожидание повторного подключения…'
-        this.setInfo({ status: 'starting', browserName: 'Zen Browser', message })
+      const handshakeTimer = this.handshakeTimers.get(socket)
+      if (handshakeTimer) clearTimeout(handshakeTimer)
+      this.handshakeTimers.delete(socket)
+      this.authenticatedVersions.delete(socket)
+      const removed = this.connectors.remove(socket)
+      this.rejectPending(new BridgeError('browser', 'Профиль браузера отключился.'), socket)
+      if (!removed) return
+      const wasActive = this.socket === socket
+      if (wasActive) {
+        this.syncActiveConnector()
+        const active = this.connectors.getActive()
+        if (active) {
+          this.setInfo({
+            status: 'running',
+            browserName: active.browserName,
+            message: 'Переключено на другой подключённый профиль браузера.',
+          })
+        } else {
+          this.setInfo({
+            status: 'starting',
+            browserName: 'Zen Browser',
+            message: 'Все профили браузеров отключены. Ожидание повторного подключения…',
+          })
+        }
         const unconfirmedCancellations = this.taskRegistry.finalizeCancelling((task) => ({
           model: task.model,
           taskId: task.taskId,
           batchId: task.batchId,
           status: 'cancelled',
-          error: 'Расширение отключилось до подтверждения отмены; локальная задача закрыта.',
+          error: 'Активный профиль браузера отключился до подтверждения отмены; локальная задача закрыта.',
           updatedAt: Date.now(),
         }))
         for (const result of unconfirmedCancellations) this.emit({ type: 'model', result })
-        this.rejectPending(new BridgeError('browser', message))
+        if (active) {
+          setTimeout(() => {
+            if (this.connectors.getActive() !== active) return
+            void this.checkSessions().catch((error: unknown) => {
+              console.error('[zen-bridge] Session check after connector failover failed:', error)
+            })
+          }, 3500)
+        }
+      } else {
+        this.emit({ type: 'zen-connection', connection: this.getZenConnection() })
       }
     })
 
@@ -460,37 +558,34 @@ export class ZenBridge {
     })
   }
   private adoptSocket(socket: WebSocket, extensionVersion: unknown): void {
-    const previousSocket = this.socket
-    this.socket = socket
-    this.extensionVersion = typeof extensionVersion === 'string' ? extensionVersion : undefined
-    if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
-    this.clientHandshakeTimer = null
-    this.clientInfo = null
-    this.clientHeartbeatAt = 0
-    this.authenticated = true
-    if (previousSocket && previousSocket !== socket) {
-      try {
-        previousSocket.close(1008, 'Replaced by a new connection')
-      } catch {
-        // Ignore.
-      }
-    }
+    const version = typeof extensionVersion === 'string' ? extensionVersion : undefined
+    this.authenticatedVersions.set(socket, version)
     socket.send(JSON.stringify({ type: 'auth-ok', serverVersion: '0.1.0' }))
-    this.clientHandshakeTimer = setTimeout(() => {
-      if (this.socket === socket && !this.clientInfo) socket.close(1008, 'Client identity handshake timeout')
+    const timer = setTimeout(() => {
+      if (!this.connectors.getByTransport(socket)) socket.close(1008, 'Client identity handshake timeout')
     }, 10_000)
-    this.setInfo({
-      status: 'starting',
-      browserName: 'Zen Browser',
-      message: 'Авторизация подтверждена. Проверяется экземпляр браузера…',
-    })
-    // Give the freshly created tabs time to load before the first check,
-    // otherwise the UI would briefly show false errors for every model.
-    setTimeout(() => {
-      void this.checkSessions().catch((error: unknown) => {
-        console.error('[zen-bridge] Automatic session check failed:', error)
+    this.handshakeTimers.set(socket, timer)
+    if (!this.connectors.getActive()) {
+      this.setInfo({
+        status: 'starting',
+        browserName: 'Zen Browser',
+        message: 'Авторизация подтверждена. Проверяется экземпляр браузера…',
       })
-    }, 3500)
+    }
+  }
+
+  private syncActiveConnector(): void {
+    const active = this.connectors.getActive()
+    this.socket = active?.transport ?? null
+    this.authenticated = Boolean(active)
+    this.extensionVersion = active?.extensionVersion
+    this.clientInfo = active ? {
+      instanceId: active.instanceId,
+      browserName: active.browserName,
+      browserVersion: active.browserVersion,
+      extensionVersion: active.extensionVersion,
+    } : null
+    this.clientHeartbeatAt = active?.lastHeartbeatAt ?? 0
   }
 
   private handleProgress(message: ZenProgressMessage): void {
@@ -516,9 +611,9 @@ export class ZenBridge {
     })
   }
 
-  private handleResponse(message: ZenResponseMessage): void {
+  private handleResponse(message: ZenResponseMessage, socket: WebSocket): void {
     const pending = this.pending.get(message.id)
-    if (!pending) return
+    if (!pending || pending.socket !== socket) return
     this.pending.delete(message.id)
     clearTimeout(pending.timer)
 
@@ -532,7 +627,9 @@ export class ZenBridge {
   }
 
   private sendCommand(action: string, payload: unknown, timeoutMs: number): Promise<unknown> {
-    if (!this.socket || !this.authenticated || this.socket.readyState !== WebSocket.OPEN) {
+    const active = this.connectors.getActive()
+    if (!active || !this.authenticated || active.transport.readyState !== WebSocket.OPEN
+      || !this.connectors.isFresh(active, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
       return Promise.reject(
         new BridgeError(
           'browser',
@@ -541,14 +638,14 @@ export class ZenBridge {
       )
     }
 
-    const socket = this.socket
+    const socket = active.transport
     const id = `${Date.now()}-${++this.commandSeq}`
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new BridgeError('timeout', 'Расширение Zen не ответило вовремя.'))
       }, timeoutMs)
-      this.pending.set(id, { resolve, reject, timer })
+      this.pending.set(id, { socket, resolve, reject, timer })
       try {
         socket.send(JSON.stringify({ type: 'command', id, action, payload }))
       } catch (error) {
@@ -564,12 +661,13 @@ export class ZenBridge {
     })
   }
 
-  private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) {
+  private rejectPending(error: Error, socket?: WebSocket): void {
+    for (const [id, pending] of this.pending) {
+      if (socket && pending.socket !== socket) continue
       clearTimeout(pending.timer)
       pending.reject(error)
+      this.pending.delete(id)
     }
-    this.pending.clear()
   }
 
   async openBrowser(): Promise<BrowserInfo> {
@@ -965,8 +1063,9 @@ export class ZenBridge {
 
   async close(): Promise<void> {
     if (this.startPromise) await this.startPromise.catch(() => undefined)
-    if (this.clientHandshakeTimer) clearTimeout(this.clientHandshakeTimer)
-    this.clientHandshakeTimer = null
+    for (const timer of this.handshakeTimers.values()) clearTimeout(timer)
+    this.handshakeTimers.clear()
+    this.authenticatedVersions.clear()
     if (this.heartbeat) {
       clearInterval(this.heartbeat)
       this.heartbeat = null
@@ -985,6 +1084,7 @@ export class ZenBridge {
     this.socket = null
     this.clientInfo = null
     this.clientHeartbeatAt = 0
+    this.connectors.clear()
     const server = this.server
     this.server = null
     if (server) {

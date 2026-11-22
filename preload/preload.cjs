@@ -51,7 +51,13 @@ function isAggregatorEvent(value) {
     const connection = value.connection
     return isRecord(connection) && typeof connection.pairingCode === 'string' &&
       typeof connection.wsUrl === 'string' && typeof connection.connected === 'boolean' &&
-      (connection.extensionVersion === undefined || typeof connection.extensionVersion === 'string')
+      (connection.extensionVersion === undefined || typeof connection.extensionVersion === 'string') &&
+      (connection.activeConnectorId === undefined || typeof connection.activeConnectorId === 'string') &&
+      (connection.connectors === undefined || (Array.isArray(connection.connectors) && connection.connectors.every((connector) =>
+        isRecord(connector) && typeof connector.instanceId === 'string' &&
+        typeof connector.browserName === 'string' && typeof connector.browserVersion === 'string' &&
+        typeof connector.extensionVersion === 'string' && Number.isFinite(connector.connectedAt) &&
+        Number.isFinite(connector.lastHeartbeatAt) && typeof connector.active === 'boolean')))
   }
 
   return false
@@ -71,6 +77,7 @@ contextBridge.exposeInMainWorld('aggregator', {
   copyText: (text) => ipcRenderer.invoke('aggregator:copyText', text),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   getZenConnection: () => ipcRenderer.invoke('aggregator:getZenConnection'),
+  setActiveConnector: (instanceId) => ipcRenderer.invoke('aggregator:setActiveConnector', instanceId),
   onEvent: (callback) => {
     if (typeof callback !== 'function') return () => {}
     const handler = (_event, payload) => {
