@@ -486,7 +486,7 @@ export class ZenBridge {
           socket.close(1007, 'Invalid progress payload')
           return
         }
-        if (this.connectors.getActive()?.transport === socket) this.handleProgress(message)
+        this.handleProgress(message, socket)
         return
       }
       if (message.type === 'response') {
@@ -531,15 +531,7 @@ export class ZenBridge {
             message: 'Все профили браузеров отключены. Ожидание повторного подключения…',
           })
         }
-        const unconfirmedCancellations = this.taskRegistry.finalizeCancelling((task) => ({
-          model: task.model,
-          taskId: task.taskId,
-          batchId: task.batchId,
-          status: 'cancelled',
-          error: 'Активный профиль браузера отключился до подтверждения отмены; локальная задача закрыта.',
-          updatedAt: Date.now(),
-        }))
-        for (const result of unconfirmedCancellations) this.emit({ type: 'model', result })
+
         if (active) {
           setTimeout(() => {
             if (this.connectors.getActive() !== active) return
@@ -588,7 +580,7 @@ export class ZenBridge {
     this.clientHeartbeatAt = active?.lastHeartbeatAt ?? 0
   }
 
-  private handleProgress(message: ZenProgressMessage): void {
+  private handleProgress(message: ZenProgressMessage, socket: WebSocket): void {
     if (this.synthesisActive) return
     const { model, phase, taskId } = message
     if (!this.progressModels.has(model)) return
@@ -596,8 +588,9 @@ export class ZenBridge {
     const task = taskId
       ? this.taskRegistry.get(taskId)
       : this.taskRegistry.getByModel(model)
-    if (taskId && (!task || task.model !== model)) return
-    if (task && !this.taskRegistry.setStatus(task.taskId, phase)) return
+    if (taskId && (!task || task.model !== model || task.connectorId !== this.connectors.getByTransport(socket)?.instanceId)) return
+    if (!task || task.connectorGeneration !== this.connectors.getByTransport(socket)?.generation) return
+    if (!this.taskRegistry.setStatus(task.taskId, phase)) return
 
     this.emit({
       type: 'model',
@@ -626,16 +619,17 @@ export class ZenBridge {
     pending.reject(new BridgeError(error.code ?? 'unknown', error.message, error.partial))
   }
 
-  private sendCommand(action: string, payload: unknown, timeoutMs: number): Promise<unknown> {
-    const active = this.connectors.getActive()
-    if (!active || !this.authenticated || active.transport.readyState !== WebSocket.OPEN
-      || !this.connectors.isFresh(active, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
-      return Promise.reject(
-        new BridgeError(
-          'browser',
-          'Расширение Zen не подключено. Откройте расширение Multi-AI Aggregator Bridge в Zen и вставьте код подключения из приложения.',
-        ),
-      )
+  private sendCommand(action: string, payload: unknown, timeoutMs: number, connectorId?: string, expectedGeneration?: number): Promise<unknown> {
+    const active = connectorId ? this.connectors.get(connectorId) : this.connectors.getActive()
+    if (!active || active.transport.readyState !== WebSocket.OPEN
+      || !this.connectors.isFresh(active, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)
+      || (expectedGeneration !== undefined && active.generation !== expectedGeneration)) {
+      return Promise.reject(new BridgeError(
+        'browser',
+        connectorId
+          ? 'Профиль браузера, закреплённый за задачей, отключён или не отвечает.'
+          : 'Расширение Zen не подключено. Откройте расширение Multi-AI Aggregator Bridge в браузере и вставьте код подключения из приложения.',
+      ))
     }
 
     const socket = active.transport
@@ -826,7 +820,7 @@ export class ZenBridge {
       },
     })
 
-    const cancelPromise = this.sendCommand('cancelTask', { taskId }, 10_000)
+    const cancelPromise = this.sendCommand('cancelTask', { taskId }, 10_000, task.connectorId, task.connectorGeneration)
       .then((data) => {
         const acknowledged =
           Boolean(data) &&
@@ -921,7 +915,15 @@ export class ZenBridge {
       }
     }
 
-    const task: ActiveTask = { taskId, batchId, model, status: 'opening' }
+    const connector = this.connectors.getActive()
+    if (!connector || connector.transport.readyState !== WebSocket.OPEN
+      || !this.connectors.isFresh(connector, Date.now(), CLIENT_HEARTBEAT_TIMEOUT_MS)) {
+      return {
+        model, taskId, batchId, status: 'error',
+        error: 'Нет активного подключённого профиля браузера.', errorCode: 'browser', updatedAt: Date.now(),
+      }
+    }
+    const task: ActiveTask = { taskId, batchId, model, connectorId: connector.instanceId, connectorGeneration: connector.generation, status: 'opening' }
     this.taskRegistry.register(task)
     this.running.add(model)
     this.progressModels.add(model)
@@ -939,6 +941,8 @@ export class ZenBridge {
           purpose: 'answer',
         },
         RESPONSE_TIMEOUT_MS + COMMAND_GRACE_MS,
+        task.connectorId,
+        task.connectorGeneration,
       )
       if (!data || typeof data !== 'object' || (data as Record<string, unknown>).taskId !== taskId) {
         throw new BridgeError('unknown', `${MODEL_LABELS[model]}: ответ расширения не совпадает с идентификатором задачи.`)

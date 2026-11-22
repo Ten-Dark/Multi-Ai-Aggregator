@@ -13,6 +13,8 @@ function task(overrides = {}) {
     taskId,
     batchId,
     model: 'chatgpt',
+    connectorId: 'connector-a',
+    connectorGeneration: 1,
     status: 'opening',
     ...overrides,
   }

@@ -172,3 +172,66 @@ test('bridge keeps multiple profiles connected, replaces only matching identity,
   assert.equal(bridge.getZenConnection().connectors.length, 1)
   replacement.close()
 })
+
+test('task and cancellation remain pinned to the originating connector generation', async (t) => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), 'mai-task-connector-'))
+  const previousPort = process.env.AGGREGATOR_ZEN_PORT
+  process.env.AGGREGATOR_ZEN_PORT = String(await getAvailablePort())
+  const bridge = new ZenBridge(dataDir, () => {}, {
+    secureDirectory: (directory) => mkdirSync(directory, { recursive: true }),
+    secureFile: () => {},
+  })
+
+  t.after(async () => {
+    await bridge.close()
+    if (previousPort === undefined) delete process.env.AGGREGATOR_ZEN_PORT
+    else process.env.AGGREGATOR_ZEN_PORT = previousPort
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  await bridge.start()
+  const initial = bridge.getZenConnection()
+  const token = initial.pairingCode.slice(initial.pairingCode.lastIndexOf('|') + 1)
+  const first = await connectConnector(initial.wsUrl, token, IDS.first, 'Zen')
+  const second = await connectConnector(initial.wsUrl, token, IDS.second, 'Firefox')
+  const commandsOnSecond = []
+  second.on('message', (raw) => {
+    const message = JSON.parse(raw.toString())
+    if (message.type === 'command') commandsOnSecond.push(message)
+  })
+
+  const sendPromise = bridge.sendOne('chatgpt', 'task bound to first connector')
+  const sendCommand = await waitForMessage(first, (message) => message.type === 'command' && message.action === 'send')
+  assert.equal(sendCommand.payload.model, 'chatgpt')
+
+  // Simulate an unexpected active-profile change: task ownership must override it.
+  bridge.connectors.setActive(IDS.second)
+  const cancellationPromise = bridge.cancelTask(sendCommand.payload.taskId)
+  const cancelCommand = await waitForMessage(first, (message) => message.type === 'command' && message.action === 'cancelTask')
+  assert.equal(cancelCommand.payload.taskId, sendCommand.payload.taskId)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(commandsOnSecond.length, 0, 'task and cancellation must never migrate to another profile')
+
+  first.send(JSON.stringify({
+    type: 'response',
+    id: cancelCommand.id,
+    ok: true,
+    data: { taskId: sendCommand.payload.taskId, cancelled: true },
+  }))
+  const cancellation = await cancellationPromise
+  assert.equal(cancellation.accepted, true)
+  assert.equal(cancellation.confirmed, true)
+
+  first.send(JSON.stringify({
+    type: 'response',
+    id: sendCommand.id,
+    ok: true,
+    data: { taskId: sendCommand.payload.taskId, text: 'late response' },
+  }))
+  const result = await sendPromise
+  assert.equal(result.status, 'cancelled', 'late completion must not overwrite confirmed cancellation')
+  assert.equal(commandsOnSecond.length, 0)
+
+  first.close()
+  second.close()
+})

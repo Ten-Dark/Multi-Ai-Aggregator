@@ -4,6 +4,8 @@ export interface ActiveTask {
   taskId: TaskId
   batchId?: TaskId
   model: ModelId
+  connectorId: string
+  connectorGeneration: number
   status: TaskStatus
   result?: ModelResult
   cancelPromise?: Promise<boolean>

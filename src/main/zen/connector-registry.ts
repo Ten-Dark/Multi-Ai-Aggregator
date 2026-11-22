@@ -8,6 +8,7 @@ export interface ZenConnectorIdentity {
 export interface ZenConnector<TTransport> extends ZenConnectorIdentity {
   transport: TTransport
   connectedAt: number
+  generation: number
   lastHeartbeatAt: number
 }
 
@@ -20,6 +21,7 @@ export class ZenConnectorRegistry<TTransport> {
   private readonly connectors = new Map<string, ZenConnector<TTransport>>()
   private readonly transports = new Map<TTransport, string>()
   private activeInstanceId: string | null = null
+  private generationSeq = 0
 
   register(
     identity: ZenConnectorIdentity,
@@ -43,6 +45,7 @@ export class ZenConnectorRegistry<TTransport> {
       ...identity,
       transport,
       connectedAt: now,
+      generation: ++this.generationSeq,
       lastHeartbeatAt: now,
     }
     this.connectors.set(identity.instanceId, connector)

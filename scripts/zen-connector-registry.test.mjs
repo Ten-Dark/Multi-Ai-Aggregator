@@ -35,8 +35,10 @@ test('reconnect replaces only the matching profile transport', () => {
 
   registry.register(identity('profile-one'), firstSocket, 100)
   registry.register(identity('profile-two'), otherSocket, 150)
-  const result = registry.register(identity('profile-one'), replacementSocket, 200)
+  const firstGeneration = registry.get('profile-one').generation
+  const result = registry.register(identity('profile-one'), replacementSocket, 100)
 
+  assert.equal(result.connector.generation > firstGeneration, true)
   assert.equal(result.replacedTransport, firstSocket)
   assert.equal(registry.size, 2)
   assert.equal(registry.getByTransport(firstSocket), undefined)
