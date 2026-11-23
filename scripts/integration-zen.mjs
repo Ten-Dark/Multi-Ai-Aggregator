@@ -1,76 +1,45 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 import { _electron as electron } from 'playwright'
 
+if (process.env.MAI_ALLOW_USER_PROFILE_SMOKE !== '1') {
+  throw new Error('Refusing to launch the app against the normal user profile. Set MAI_ALLOW_USER_PROFILE_SMOKE=1 explicitly.')
+}
+if (process.env.MAI_ALLOW_LIVE_PROVIDER_TESTS !== '1') {
+  throw new Error('Refusing to submit a real provider prompt. Set MAI_ALLOW_LIVE_PROVIDER_TESTS=1 explicitly.')
+}
+
+const zenExecutable = process.env.MAI_ZEN_EXECUTABLE_PATH
+if (!zenExecutable || !path.isAbsolute(zenExecutable) || !fs.existsSync(zenExecutable)) {
+  throw new Error('Set MAI_ZEN_EXECUTABLE_PATH to the absolute path of the Zen executable used for the isolated test profile.')
+}
+
 const project = process.cwd()
-const root = 'C:\\Users\\Sondr\\AppData\\Local\\Temp\\opencode\\zen-ext-test\\app-integration'
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'multi-ai-aggregator-zen-integration-'))
 const profile = path.join(root, 'profile')
 const stage = path.join(root, 'stage')
 const xpiZip = path.join(root, 'extension.zip')
 const xpi = path.join(root, 'multi-ai-aggregator-zen.xpi')
 const logPath = path.join(root, 'zen.log')
+const zipScript = path.join(root, 'create-extension.ps1')
 
-fs.rmSync(root, { recursive: true, force: true })
-fs.mkdirSync(root, { recursive: true })
+let app
+let zen
+let logFd
+let sendResult = null
 
-const app = await electron.launch({ args: ['.'], cwd: project })
-app.process().stderr?.on('data', (chunk) => process.stderr.write(`[app:err] ${chunk}`))
-const page = await app.firstWindow()
-page.on('console', (message) => console.log(`[console:${message.type()}] ${message.text()}`))
-page.on('pageerror', (error) => console.log(`[pageerror] ${error.message}`))
-await page.waitForSelector('h1', { timeout: 30_000 })
+const logResult = (label, result) => {
+  console.log(label, JSON.stringify({
+    status: result?.status,
+    errorCode: result?.errorCode,
+    hasText: Boolean(result?.text),
+    textLength: result?.text?.length ?? 0,
+  }))
+}
 
-const codeLocator = page.locator('.pairing-code')
-await codeLocator.waitFor({ timeout: 20_000 })
-const pairingCode = (await codeLocator.innerText()).trim()
-console.log('PAIRING_CODE_READY', pairingCode.startsWith('ws://127.0.0.1:') && pairingCode.includes('|'))
-if (!pairingCode.startsWith('ws://127.0.0.1:')) throw new Error('Pairing code is not ready.')
-
-fs.cpSync(path.join(project, 'zen-extension'), stage, { recursive: true })
-const manifestPath = path.join(stage, 'manifest.json')
-const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-manifest.name = 'Multi-AI Aggregator Bridge [Integration Test]'
-fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
-fs.writeFileSync(path.join(stage, 'dev-pairing.json'), JSON.stringify({ code: pairingCode }))
-execFileSync('powershell.exe', [
-  '-NoProfile',
-  '-Command',
-  `Compress-Archive -Path '${stage}\\*' -DestinationPath '${xpiZip}' -Force; Copy-Item -LiteralPath '${xpiZip}' -Destination '${xpi}' -Force`,
-])
-
-fs.mkdirSync(profile, { recursive: true })
-fs.writeFileSync(
-  path.join(profile, 'user.js'),
-  [
-    'user_pref("xpinstall.signatures.required", false);',
-    'user_pref("extensions.autoDisableScopes", 0);',
-    'user_pref("extensions.enabledScopes", 15);',
-    'user_pref("extensions.update.enabled", false);',
-    'user_pref("browser.shell.checkDefaultBrowser", false);',
-    'user_pref("browser.startup.page", 0);',
-    'user_pref("browser.startup.homepage", "about:blank");',
-    'user_pref("datareporting.policy.dataSubmissionEnabled", false);',
-    'user_pref("datareporting.healthreport.uploadEnabled", false);',
-    'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);',
-    'user_pref("app.update.auto", false);',
-    'user_pref("app.update.enabled", false);',
-    'user_pref("browser.aboutwelcome.enabled", false);',
-    'user_pref("browser.sessionstore.resume_from_crash", false);',
-  ].join('\n'),
-)
-fs.mkdirSync(path.join(profile, 'extensions'), { recursive: true })
-fs.copyFileSync(xpi, path.join(profile, 'extensions', 'multi-ai-aggregator@local.xpi'))
-
-const log = fs.openSync(logPath, 'w')
-const zen = spawn(
-  'D:\\programs\\browsers\\zen.exe',
-  ['-no-remote', '-new-instance', '-headless', '-profile', profile],
-  { stdio: ['ignore', log, log] },
-)
-console.log('ZEN_PID', zen.pid)
-
-async function waitForText(selector, predicate, timeoutMs, label) {
+async function waitForText(page, selector, predicate, timeoutMs, label) {
   const deadline = Date.now() + timeoutMs
   let lastText = ''
   while (Date.now() < deadline) {
@@ -78,27 +47,110 @@ async function waitForText(selector, predicate, timeoutMs, label) {
     if (predicate(lastText)) return lastText
     await page.waitForTimeout(1000)
   }
-  throw new Error(`Timeout waiting for ${label}. Last text: ${lastText}`)
+  throw new Error(`Timeout waiting for ${label}.`)
 }
 
-let sendResult = null
 try {
-  const badge = await waitForText('.browser-badge', (text) => text.includes('подключён'), 90_000, 'Zen connection')
-  console.log('BADGE', badge)
+  app = await electron.launch({ args: ['.'], cwd: project })
+  const page = await app.firstWindow()
+  page.on('pageerror', (error) => console.error('APP_PAGE_ERROR', error.name))
+  await page.waitForSelector('h1', { timeout: 30_000 })
+
+  const codeLocator = page.locator('.pairing-code')
+  await codeLocator.waitFor({ timeout: 20_000 })
+  const pairingCode = (await codeLocator.innerText()).trim()
+  const pairingCodeValid = pairingCode.startsWith('ws://127.0.0.1:') && pairingCode.includes('|')
+  console.log('PAIRING_CODE_READY', pairingCodeValid)
+  if (!pairingCodeValid) throw new Error('Pairing code is not ready.')
+
+  fs.cpSync(path.join(project, 'zen-extension'), stage, { recursive: true })
+  const manifestPath = path.join(stage, 'manifest.json')
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  manifest.name = 'Multi-AI Aggregator Bridge [Integration Test]'
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+  fs.writeFileSync(
+    path.join(stage, 'dev-pairing.json'),
+    JSON.stringify({ code: pairingCode }),
+    { mode: 0o600 },
+  )
+
+  fs.writeFileSync(zipScript, [
+    'param(',
+    '  [Parameter(Mandatory=$true)][string]$SourcePath,',
+    '  [Parameter(Mandatory=$true)][string]$DestinationPath,',
+    '  [Parameter(Mandatory=$true)][string]$FinalPath',
+    ')',
+    '$ErrorActionPreference = "Stop"',
+    'Compress-Archive -Path (Join-Path $SourcePath "*") -DestinationPath $DestinationPath -Force',
+    'Copy-Item -LiteralPath $DestinationPath -Destination $FinalPath -Force',
+  ].join('\n'))
+
+  execFileSync('powershell.exe', [
+    '-NoProfile',
+    '-File',
+    zipScript,
+    '-SourcePath',
+    stage,
+    '-DestinationPath',
+    xpiZip,
+    '-FinalPath',
+    xpi,
+  ], { stdio: 'ignore' })
+
+  fs.mkdirSync(path.join(profile, 'extensions'), { recursive: true })
+  fs.writeFileSync(
+    path.join(profile, 'user.js'),
+    [
+      'user_pref("xpinstall.signatures.required", false);',
+      'user_pref("extensions.autoDisableScopes", 0);',
+      'user_pref("extensions.enabledScopes", 15);',
+      'user_pref("extensions.update.enabled", false);',
+      'user_pref("browser.shell.checkDefaultBrowser", false);',
+      'user_pref("browser.startup.page", 0);',
+      'user_pref("browser.startup.homepage", "about:blank");',
+      'user_pref("datareporting.policy.dataSubmissionEnabled", false);',
+      'user_pref("datareporting.healthreport.uploadEnabled", false);',
+      'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);',
+      'user_pref("app.update.auto", false);',
+      'user_pref("app.update.enabled", false);',
+      'user_pref("browser.aboutwelcome.enabled", false);',
+      'user_pref("browser.sessionstore.resume_from_crash", false);',
+    ].join('\n'),
+  )
+  fs.copyFileSync(xpi, path.join(profile, 'extensions', 'multi-ai-aggregator@local.xpi'))
+
+  logFd = fs.openSync(logPath, 'w')
+  zen = spawn(
+    zenExecutable,
+    ['-no-remote', '-new-instance', '-headless', '-profile', profile],
+    { stdio: ['ignore', logFd, logFd] },
+  )
+  zen.once('error', (error) => console.error('ZEN_SPAWN_FAILED', error.name))
+  console.log('ZEN_STARTED', Boolean(zen.pid))
+
+  const badge = await waitForText(
+    page,
+    '.browser-badge',
+    (value) => value.includes('подключён'),
+    90_000,
+    'Zen connection',
+  )
+  console.log('BRIDGE_CONNECTED', Boolean(badge))
+
   const panels = await waitForText(
+    page,
     '.session-chip',
-    (text) => {
-      const lines = text.split('\n').filter(Boolean)
-      return lines.length >= 6 && !text.includes('Проверка')
+    (value) => {
+      const lines = value.split('\n').filter(Boolean)
+      return lines.length >= 6 && !value.includes('Проверка')
     },
     90_000,
-    'session check',
+    'provider session check',
   )
-  console.log('SESSIONS', panels)
+  console.log('SESSION_CHECK_COMPLETED', Boolean(panels))
 
   const connection = await page.evaluate(() => window.aggregator.getZenConnection())
   console.log('CONNECTION', JSON.stringify({
-    wsUrl: connection.wsUrl,
     connected: connection.connected,
     extensionVersion: connection.extensionVersion,
     pairingCodePresent: Boolean(connection.pairingCode),
@@ -107,22 +159,22 @@ try {
   sendResult = await page.evaluate(() =>
     window.aggregator.sendOne('chatgpt', 'Ответь ровно одним словом: ОК'),
   )
-  console.log('SEND_RESULT', JSON.stringify(sendResult))
+  logResult('SEND_RESULT', sendResult)
   await page.waitForTimeout(1000)
 } catch (error) {
-  console.error('INTEGRATION_ERROR', error instanceof Error ? error.message : error)
+  console.error('INTEGRATION_FAILED', error instanceof Error ? error.name : 'UnknownError')
+  process.exitCode = 1
 } finally {
-  try {
-    execFileSync('taskkill', ['/PID', String(zen.pid), '/T', '/F'], { stdio: 'ignore' })
-  } catch {
-    // Ignore.
+  if (zen?.pid) {
+    try {
+      execFileSync('taskkill', ['/PID', String(zen.pid), '/T', '/F'], { stdio: 'ignore' })
+    } catch {
+      zen.kill()
+    }
   }
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-  await page.screenshot({ path: path.join(project, 'smoke-zen.png'), fullPage: true }).catch(() => {})
-  await app.close().catch(() => {})
-  fs.closeSync(log)
+  await app?.close().catch(() => {})
+  if (logFd !== undefined) fs.closeSync(logFd)
   fs.rmSync(root, { recursive: true, force: true })
 }
 
-console.log('RESULT', JSON.stringify({ sendStatus: sendResult?.status, sendText: sendResult?.text, sendError: sendResult?.error }))
 if (sendResult?.status !== 'done') process.exitCode = 1
