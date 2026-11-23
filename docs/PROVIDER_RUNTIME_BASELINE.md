@@ -12,7 +12,7 @@ This section supersedes the earlier repository-layout and validation observation
 | Check | Result | Notes |
 |---|---|---|
 
-| Repository HEAD | `ebe04dd7d503dcf1cbba2382219c397e886460b0` | `main`; diagnostic harness hardening committed locally, pending push with this baseline update. |
+| Latest code-bearing commit | `ebe04dd7d503dcf1cbba2382219c397e886460b0` | Includes diagnostic harness hardening; the follow-up baseline documentation was pushed in `edcda97`, and `main` is synchronized with `origin/main`. |
 | `npm run typecheck` | PASS | TypeScript compilation succeeds. |
 | `npm run test:security` | PASS | **113/113 tests passed** on 2026-11-24. |
 | `npm run build:extension` | PASS | Zen extension `0.3.9`; XPI created under `artifacts/build/zen-extension/`. |
