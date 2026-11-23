@@ -5,24 +5,30 @@
 **Branch:** `main` (was synchronized with `origin/main` when this baseline was recorded)  
 **Readiness:** **Not ready for new user-facing features**
 
-## Latest repository verification — 2026-11-22
+## Latest repository verification — 2026-11-24
 
-This section supersedes only the older validation counts and repository-layout observations below. The recorded 2026-11-21 investigation and its provider-E2E limitations remain historical evidence.
+This section supersedes the earlier repository-layout and validation observations below. It does not supersede the live-provider E2E limitations or the no-go decision.
 
 | Check | Result | Notes |
 |---|---|---|
-| Repository HEAD | `90258dbf88a0bab6b9fdbfb7bf5a1788fddc5e2c` | `main`, synchronized with `origin/main` before this cleanup work. |
-| `npm run typecheck` | PASS | TypeScript compilation succeeds. |
-| `npm run test:security` | PASS | **113/113 tests passed** on 2026-11-22. |
-| `npm run build:extension` | PASS | Zen extension `0.3.9`; XPI created under `artifacts/build/zen-extension/`. |
-| `npm run dist` | PASS | Windows NSIS installer created under `artifacts/build/windows/`; packaged app was not launched against the normal user profile. |
-| `npm run release:metadata` | PASS | Update manifest and extension version marker generated successfully; local staging files were then removed. |
-| Build output layout | UPDATED | Electron Builder output now belongs under `artifacts/build/windows/`; release staging is separate. |
-| Real authenticated provider E2E | NOT VERIFIED | Deterministic tests do not replace live validation in the user's authenticated browser profiles. |
 
-The no-go decision for new user-facing features remains in force until the live-provider readiness blockers below are closed. No normal Zen profile or installed extension was modified during this verification.
+| Repository HEAD | `ebe04dd7d503dcf1cbba2382219c397e886460b0` | `main`; diagnostic harness hardening committed locally, pending push with this baseline update. |
+| `npm run typecheck` | PASS | TypeScript compilation succeeds. |
+| `npm run test:security` | PASS | **113/113 tests passed** on 2026-11-24. |
+| `npm run build:extension` | PASS | Zen extension `0.3.9`; XPI created under `artifacts/build/zen-extension/`. |
+| `npm run release:metadata` | PASS | Generated update manifest parses as valid JSON; generated staging files were removed after verification. |
+| `npm audit --omit=dev` | PASS | **0 production vulnerabilities**. |
+| `npm audit` | WARN | Six moderate findings remain in development tooling (`electron-builder` / `@electron/universal` / `minimatch`); no automatic or breaking fix was applied. |
+| Live diagnostic harnesses | PASS | `e2e-send.mjs` and `integration-zen.mjs` now require explicit profile/live-test flags, redact prompt/response output, and avoid screenshots of conversation content; guard paths and syntax checks passed without launching either harness. |
+| Live environment snapshot | PARTIAL | Zen Browser processes are running. The app was launched once by the failed diagnostic guard-check and closed after session inspection timed out before `SEND_STARTED`; no real provider prompt was submitted. A pending local bridge-token migration may have occurred. |
+| Real authenticated provider E2E | NOT VERIFIED | Requires user-controlled extension installation/pairing and manual validation of each provider in the active Zen profile. |
+
+The no-go decision for new user-facing features remains in force until the live-provider readiness blockers below are closed. Deterministic tests and package builds do not replace real authenticated provider E2E. No Zen profile or installed extension was directly modified. Because the app was launched once during the failed diagnostic preflight, a pending local bridge-token migration may have occurred; verify the displayed pairing code and extension connection before relying on the existing pairing.
+
+The repository organization cleanup was committed and pushed as `929fdf5`. Historical audit and forensic reports that were previously untracked remain local-only and were deliberately not added to the public repository.
 
 This document records the current implementation and diagnostic evidence. It supersedes older audit claims only where it explicitly describes a current source or test observation; historical forensic artifacts remain preserved and are not treated as current implementation truth.
+
 
 ## Historical verified baseline — 2026-11-21
 
@@ -58,7 +64,7 @@ After recording the initial baseline, the first reliability slice was implemente
 - Separate provider no-progress deadlines were added (35 seconds for Qwen; 45 seconds for ChatGPT and DeepSeek). A stalled response is classified as timeout/partial rather than silently treated as complete.
 - Selector provenance is provisional: Qwen's `.user-message-content` is based on community DOM observations ([reference](https://greasyfork.org/en/scripts/588050-qwen-chat-markdown-latex-renderer-user-messages)); DeepSeek's `div.fbb737a4` is based on a community live-DOM capture ([reference](https://github.com/NIyueeE/deepseek-user-message-renderer)). These are not official provider contracts and require validation in the authenticated Zen profile.
 - Session inspection no longer labels a visible composer as `logged-in` by default. It requires a positive profile indicator, returns `unknown` when evidence is inconclusive, and treats an explicit login control as `guest` or `login-required` according to provider policy. DeepSeek's positive profile selectors are provisional community-observed selectors and still require live-profile validation.
-- A reproducible `npm run build:extension` command now builds `release/zen-extension/multi-ai-aggregator-zen-<version>.xpi`, extracts it into a temporary directory, and checks its manifest and required content scripts. The XPI build passed for version `0.3.0`.
+- A reproducible `npm run build:extension` command builds `artifacts/build/zen-extension/multi-ai-aggregator-zen-<version>.xpi`, extracts it into a temporary directory, and checks its manifest and required content scripts. The XPI build passed for version `0.3.0`; the output directory was later standardized under `artifacts/build/zen-extension/`.
 - Latest validation: `npm run test:security` **PASS, 67/67**; `npm run typecheck` **PASS**; `npm run pack` **PASS** (latest Electron package build before the session-indicator-only change); `npm run build:extension` **PASS** (XPI `0.3.0`); `npm audit --omit=dev` **0 vulnerabilities**; `git diff --check` **PASS**.
 - Full `npm audit` still reports six moderate development-toolchain findings in `electron-builder` / `@electron/universal` / `minimatch`; the available automatic fix requires a breaking `electron-builder` downgrade and was not applied.
 - The packaged smoke script was not run after this change because it launches against the real Windows user-data directory and would rotate the active local pairing token. Actual profile migration is pending the next launch of the updated app; the isolated Windows migration test passes.
