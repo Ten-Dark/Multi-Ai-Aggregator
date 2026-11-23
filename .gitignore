@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 dist-electron/
 release/
+artifacts/
 
 # Test artifacts and probe data
 probe/
@@ -12,13 +13,6 @@ probe/
 # Logs and diagnostics
 *.log
 *.err
-
-# Screenshots and images
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.ico
 
 # Runtime credentials and secrets
 .env
@@ -32,3 +26,7 @@ zen-bridge-token
 Thumbs.db
 .idea/
 .vscode/
+
+# Coverage and local tooling caches
+coverage/
+.cache/

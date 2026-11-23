@@ -2,6 +2,8 @@
 
 ## Architecture and roadmap
 
+- [Project Structure](./PROJECT_STRUCTURE.md) — repository map, source-of-truth locations, generated output and cleanup boundaries.
+- [Release Process](./RELEASE_PROCESS.md) — local builds, CI signing and the release staging contract.
 - [Browser Integration Architecture](./BROWSER_INTEGRATION_ARCHITECTURE.md) — canonical user-browser-first design for browser discovery, multi-profile connectors, permissions, provider readiness, and safe self-healing.
 - [Browser Integration Roadmap](./BROWSER_INTEGRATION_ROADMAP.md) — implementation phases, tasks, dependencies, and acceptance criteria.
 - [ADR 0001 — User-Browser-First Integration](./adr/0001-user-browser-first-integration.md) — accepted decision and rejected alternatives.
@@ -11,6 +13,8 @@
 - [Zen Extension Packaging](./ZEN_EXTENSION_PACKAGING.md) — reproducible XPI build and manual update/pairing procedure.
 - [Cancellation Protocol](./CANCELLATION_PROTOCOL.md) — current task cancellation contract across Main, Zen Bridge, Extension, Content Script, preload, and Renderer.
 
+Historical audit and forensic material is retained under [`archive/`](./archive/README.md). Those reports describe earlier snapshots and are not the current implementation specification.
+
 ## Current implementation baseline
 
-The Provider Runtime architecture and roadmap are planning documents. They do not indicate that app-owned sessions or the proposed automation improvements have already been implemented. The current cancellation protocol remains the implemented execution contract until a later phase explicitly migrates it.\n
+The Provider Runtime architecture and roadmap are planning documents. They do not indicate that app-owned sessions or the proposed automation improvements have already been implemented. The current cancellation protocol remains the implemented execution contract until a later phase explicitly migrates it.

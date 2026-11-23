@@ -37,7 +37,7 @@ jobs:
         run: npx --yes web-ext@10.8.0 lint --source-dir=zen-extension --self-hosted --warnings-as-errors
 
       - name: Generate extension update metadata
-        run: node scripts/create-zen-update-manifest.mjs
+        run: npm run release:metadata
 
       - name: Sign Zen extension for self-distribution
         shell: pwsh
@@ -49,9 +49,11 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:WEB_EXT_API_KEY) -or [string]::IsNullOrWhiteSpace($env:WEB_EXT_API_SECRET)) {
             throw 'Mozilla signing credentials are missing. Configure repository secrets AMO_API_KEY and AMO_API_SECRET before publishing a release.'
           }
-          npx --yes web-ext@10.8.0 sign --source-dir=zen-extension --artifacts-dir=release/signed-extension --channel=unlisted --approval-timeout=900000 --no-input
+          New-Item -ItemType Directory -Force -Path 'artifacts/build/signed-extension' | Out-Null
+          New-Item -ItemType Directory -Force -Path 'release' | Out-Null
+          npx --yes web-ext@10.8.0 sign --source-dir=zen-extension --artifacts-dir=artifacts/build/signed-extension --channel=unlisted --approval-timeout=900000 --no-input
           if ($LASTEXITCODE -ne 0) { throw 'Mozilla AMO signing failed.' }
-          $signed = Get-ChildItem 'release/signed-extension/*.xpi' | Select-Object -First 1
+          $signed = Get-ChildItem 'artifacts/build/signed-extension/*.xpi' | Select-Object -First 1
           if (-not $signed) { throw 'Mozilla did not produce a signed XPI.' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [System.IO.Compression.ZipFile]::OpenRead($signed.FullName)
@@ -68,10 +70,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not (Test-Path 'release/multi-ai-aggregator-zen.xpi')) { throw 'Signed Zen XPI is missing.' }
-          $installer = Get-ChildItem 'release/Multi-AI-Aggregator-Setup-*.exe' | Select-Object -First 1
+          $installer = Get-ChildItem 'artifacts/build/windows/Multi-AI-Aggregator-Setup-*.exe' | Select-Object -First 1
           if (-not $installer) { throw 'Windows NSIS installer was not produced.' }
-          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -Path ($installer.FullName + '.sha256') -Value ($hash + '  ' + $installer.Name) -NoNewline -Encoding ascii
+          Copy-Item $installer.FullName 'release/' -Force
+          $releaseInstaller = Join-Path 'release' $installer.Name
+          $hash = (Get-FileHash $releaseInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path ($releaseInstaller + '.sha256') -Value ($hash + '  ' + $installer.Name) -NoNewline -Encoding ascii
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

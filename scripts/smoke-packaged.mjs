@@ -1,8 +1,13 @@
 import { _electron as electron } from 'playwright'
+import fs from 'node:fs'
 import path from 'node:path'
 
+if (process.env.MAI_ALLOW_USER_PROFILE_SMOKE !== '1') {
+  throw new Error('Refusing to launch against the normal user profile. Set MAI_ALLOW_USER_PROFILE_SMOKE=1 explicitly.')
+}
+
 const app = await electron.launch({
-  executablePath: path.resolve('release/win-unpacked/Multi-AI Aggregator.exe'),
+  executablePath: path.resolve('artifacts/build/windows/win-unpacked/Multi-AI Aggregator.exe'),
 })
 app.process().stderr?.on('data', (chunk) => process.stderr.write(`[app:err] ${chunk}`))
 
@@ -21,5 +26,8 @@ while (Date.now() < deadline) {
 }
 console.log('sessions:', JSON.stringify(sessions, null, 2))
 console.log('api available:', await window.evaluate(() => typeof window.aggregator === 'object'))
-await window.screenshot({ path: 'smoke-packaged.png', fullPage: true })
+await window.locator('.pairing-code').evaluate((element) => { element.textContent = '[REDACTED]' }).catch(() => {})
+const diagnosticsDirectory = path.resolve('artifacts/diagnostics/smoke')
+fs.mkdirSync(diagnosticsDirectory, { recursive: true })
+await window.screenshot({ path: path.join(diagnosticsDirectory, 'smoke-packaged.png'), fullPage: true })
 await app.close()

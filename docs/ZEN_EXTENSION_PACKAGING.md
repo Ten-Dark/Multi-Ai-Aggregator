@@ -10,10 +10,10 @@ npm run build:extension
 
 The script reads `zen-extension/manifest.json`, packages the extension root into an XPI, extracts the archive into a temporary directory, and verifies the packaged manifest and required content scripts before publishing the artifact.
 
-Output:
+Local build output (ignored by Git):
 
 ```text
-release/zen-extension/multi-ai-aggregator-zen-<manifest-version>.xpi
+artifacts/build/zen-extension/multi-ai-aggregator-zen-<manifest-version>.xpi
 ```
 
 The XPI contains only the extension source tree. It does not contain the integration-test `dev-pairing.json` file or any application pairing token.
@@ -26,7 +26,7 @@ The application now rotates the legacy bridge token into its protected `userData
 
 ## Verification boundaries
 
-- The packaging script verifies archive contents and manifest version consistency.
+- The packaging script verifies archive contents and manifest version consistency, and removes stale versioned packages from its generated output directory before writing the current artifact.
 - A successful XPI build does not prove that the extension connects to the app or that provider automation works.
 - Do not automate changes to the user's normal Zen profile. Real-provider E2E must be performed only after the user installs the XPI and completes pairing.
 

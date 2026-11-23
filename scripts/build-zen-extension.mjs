@@ -16,7 +16,7 @@ if (!manifest.version || !Array.isArray(manifest.content_scripts)) {
   throw new Error('The Zen extension manifest is missing required packaging metadata.')
 }
 
-const outputDirectory = path.join(projectRoot, 'release', 'zen-extension')
+const outputDirectory = path.join(projectRoot, 'artifacts', 'build', 'zen-extension')
 const outputZip = path.join(outputDirectory, `multi-ai-aggregator-zen-${manifest.version}.zip`)
 const outputXpi = path.join(outputDirectory, `multi-ai-aggregator-zen-${manifest.version}.xpi`)
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'mai-zen-xpi-'))
@@ -31,6 +31,11 @@ const powershell = path.join(
 
 try {
   fs.mkdirSync(outputDirectory, { recursive: true })
+  for (const entry of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
+    if (entry.isFile() && /^multi-ai-aggregator-zen-.*\.(xpi|zip)$/i.test(entry.name)) {
+      fs.rmSync(path.join(outputDirectory, entry.name), { force: true })
+    }
+  }
   fs.mkdirSync(verificationDirectory, { recursive: true })
   fs.rmSync(outputZip, { force: true })
 

@@ -2,16 +2,18 @@
   "name": "multi-ai-aggregator",
   "version": "0.1.4",
   "private": true,
+  "author": "Ten-Dark",
   "description": "Local Electron app that queries ChatGPT, Qwen and DeepSeek and synthesizes their answers",
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_RENDERER_URL=http://localhost:5173 electron .\"",
-    "clean": "node -e \"require('node:fs').rmSync('dist-electron', { recursive: true, force: true })\"",
+    "clean": "node -e \"const fs=require('node:fs');fs.rmSync('dist-electron',{recursive:true,force:true});fs.rmSync('artifacts/build',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.json && vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:security": "npm run build && node --test --test-concurrency=1 scripts/*.test.mjs",
     "build:extension": "node scripts/build-zen-extension.mjs",
+    "release:metadata": "node scripts/create-zen-update-manifest.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --publish never"
   },
@@ -39,7 +41,7 @@
     "productName": "Multi-AI Aggregator",
     "appId": "com.local.multiaggregator",
     "directories": {
-      "output": "release"
+      "output": "artifacts/build/windows"
     },
     "files": [
       "dist-electron/**/*",

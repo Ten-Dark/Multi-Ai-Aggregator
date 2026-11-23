@@ -1,5 +1,10 @@
 import { _electron as electron } from 'playwright'
+import fs from 'node:fs'
 import path from 'node:path'
+
+if (process.env.MAI_ALLOW_USER_PROFILE_SMOKE !== '1') {
+  throw new Error('Refusing to launch against the normal user profile. Set MAI_ALLOW_USER_PROFILE_SMOKE=1 explicitly.')
+}
 
 const app = await electron.launch({
   args: ['.'],
@@ -33,7 +38,10 @@ console.log('browser badge:', await window.locator('.browser-badge').innerText()
 console.log('send button disabled:', await window.locator('.query-actions .button.primary').isDisabled())
 console.log('synthesis button disabled:', await window.locator('.synthesis-controls .button.primary').isDisabled())
 
-const shotPath = path.join(process.cwd(), 'smoke-main.png')
+await window.locator('.pairing-code').evaluate((element) => { element.textContent = '[REDACTED]' }).catch(() => {})
+const diagnosticsDirectory = path.join(process.cwd(), 'artifacts', 'diagnostics', 'smoke')
+fs.mkdirSync(diagnosticsDirectory, { recursive: true })
+const shotPath = path.join(diagnosticsDirectory, 'smoke-main.png')
 await window.screenshot({ path: shotPath, fullPage: true })
 console.log('screenshot:', shotPath)
 

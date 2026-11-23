@@ -1,0 +1,37 @@
+# Release process
+
+## Local build
+
+```powershell
+npm ci
+npm run typecheck
+npm run test:security
+npm run dist
+npm run build:extension
+```
+
+Generated files are kept outside the release staging directory:
+
+- Windows installer and unpacked Electron package: `artifacts/build/windows/`
+- Local unsigned Zen XPI: `artifacts/build/zen-extension/`
+
+## Official release
+
+Push a version tag (`v*`) to start `.github/workflows/release.yml`. The workflow runs tests, builds the installer and extension, lints the extension, creates update metadata, obtains a Mozilla AMO unlisted signature, verifies the signature metadata, and stages the final files in `release/`.
+
+The release staging directory contains only the files uploaded to GitHub Releases:
+
+- `Multi-AI-Aggregator-Setup-<version>.exe`
+- matching `.sha256` file
+- `multi-ai-aggregator-zen.xpi` (Mozilla-signed)
+- `updates.json`
+- `zen-extension-version.txt`
+
+Never publish the local unsigned XPI as the self-distributed update package. Signing credentials belong only in GitHub Actions secrets (`AMO_API_KEY`, `AMO_API_SECRET`).
+
+## Cleanup rules
+
+- `npm run clean` removes `dist-electron/` and `artifacts/build/` only.
+- It deliberately does not remove `artifacts/diagnostics/`, `probe/`, browser profiles, or `release/`.
+- Review and clean those local-only directories separately; do not delete evidence or user browser data as part of a routine build.
+- The authoritative published artifacts are on the [GitHub Releases page](https://github.com/Ten-Dark/Multi-Ai-Aggregator/releases/latest), not old files left by previous local builds.

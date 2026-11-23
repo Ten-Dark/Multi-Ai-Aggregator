@@ -1,8 +1,8 @@
 # Browser Integration Architecture
 
-**Status:** Target architecture approved for implementation planning; Stage 0 documentation baseline.
+**Status:** Accepted target architecture; implementation is partial and must be assessed against the current source and tests.
 **Supersedes:** The app-owned-session-first direction in `PROVIDER_RUNTIME_ARCHITECTURE.md`. That document remains useful for provider automation and session-isolation requirements, but its browser-host and session-ownership assumptions are no longer the primary product direction.
-**Current implementation:** Electron Main + a Zen-specific WebExtension (Manifest V2) + loopback WebSocket bridge.
+**Current implementation:** Electron Main + Renderer/preload + browser process discovery + a Zen-specific WebExtension (Manifest V2) + an authenticated loopback WebSocket bridge. The bridge supports multiple extension instances/profiles and per-provider connector affinity; the browser-extension abstraction is not yet browser-neutral.
 **Initial providers:** ChatGPT, Qwen, DeepSeek.
 **Initial OS:** Windows; architecture must not encode Windows-only assumptions into Core.
 
@@ -33,6 +33,9 @@ The application should recover transient integration failures autonomously where
 ## 3. Current baseline and confirmed constraints
 
 - Electron Main currently constructs `ZenBridge` directly in `src/main/main.ts`; IPC types and handlers expose Zen-named bridge methods.
+- Process discovery is implemented behind `BrowserDiscoveryService` and platform-specific discovery providers. It reports process/executable/profile metadata candidates; it does not prove extension connectivity, tab visibility, or provider authentication.
+- `ZenConnectorRegistry` and `ZenBridge` support multiple authenticated extension instances, connector generations, heartbeats, explicit active selection, and per-provider routing. These are Zen-specific implementations, not yet the generic `BrowserConnector` contract shown in the target architecture.
+- Provider-to-connector affinity and task routing are covered by deterministic tests. Live authenticated browser parity across multiple real browser families remains unverified.
 - The extension is named and packaged as a Zen bridge and uses Manifest V2 in `zen-extension/manifest.json`.
 - Extension background tab discovery calls `browser.tabs.query({})`. This can discover tabs only in the browser profile where that extension instance is running.
 - The extension's declared host permissions cover the three provider domains and loopback bridge. They do not install the extension in another browser or grant permissions in another profile.
@@ -68,7 +71,7 @@ Aggregator Core (Electron Main)
                   └─ Provider adapters: ChatGPT / Qwen / DeepSeek / future providers
 ```
 
-The Core knows connector capabilities and opaque identities, not browser-specific UI details. A connector instance represents one extension runtime in one browser profile. Multiple connector instances may be connected concurrently.
+The target Core knows connector capabilities and opaque identities, not browser-specific UI details. A connector instance represents one extension runtime in one browser profile. Multiple connector instances may be connected concurrently. The current code has multi-instance transport and routing primitives, but still exposes Zen-specific types and lifecycle methods at the Main/IPC boundary; extracting the generic connector contract remains a migration task.
 
 ### 4.1 Browser Discovery
 

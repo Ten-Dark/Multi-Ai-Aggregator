@@ -3,7 +3,7 @@
 Status: Stages 1–5 implemented; full regression and packaged verification remain
 Scope: Electron Renderer, Main Process, Zen WebSocket Bridge, Zen Extension  
 Compatibility: additive protocol revision; no change to authentication or extension-origin pinning
-Zen Extension version: 0.3.0 (required for task-correlated send responses and cancellation)
+Protocol baseline: Zen Extension 0.3.0 introduced task-correlated send responses and cancellation. The current extension source version is defined by `zen-extension/manifest.json`.
 
 ## 1. Goals and invariants
 

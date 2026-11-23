@@ -117,7 +117,7 @@ export function ConnectionPanel({
           <li>В Zen открой <code>about:debugging#/runtime/this-firefox</code>.</li>
           <li>
             Постоянная установка: <code>about:addons</code> → шестерёнка → «Установить
-            дополнение из файла…» → <code>release\\multi-ai-aggregator-zen.xpi</code>. Оно
+            дополнение из файла…» → выберите скачанный <code>multi-ai-aggregator-zen.xpi</code> со страницы GitHub Releases. Оно
             сохраняется после перезапуска Zen.
           </li>
           <li>

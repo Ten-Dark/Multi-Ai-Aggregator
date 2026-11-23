@@ -1,6 +1,6 @@
 # ADR 0001: User-Browser-First Integration
 
-- **Status:** Accepted for implementation planning
+- **Status:** Accepted
 - **Date:** 2026-11-21
 - **Decision owners:** Multi-AI Aggregator project
 - **Related:** [Browser Integration Architecture](../BROWSER_INTEGRATION_ARCHITECTURE.md), [Provider Runtime Architecture](../PROVIDER_RUNTIME_ARCHITECTURE.md)

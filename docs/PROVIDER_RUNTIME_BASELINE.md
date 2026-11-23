@@ -5,9 +5,26 @@
 **Branch:** `main` (was synchronized with `origin/main` when this baseline was recorded)  
 **Readiness:** **Not ready for new user-facing features**
 
+## Latest repository verification — 2026-11-22
+
+This section supersedes only the older validation counts and repository-layout observations below. The recorded 2026-11-21 investigation and its provider-E2E limitations remain historical evidence.
+
+| Check | Result | Notes |
+|---|---|---|
+| Repository HEAD | `90258dbf88a0bab6b9fdbfb7bf5a1788fddc5e2c` | `main`, synchronized with `origin/main` before this cleanup work. |
+| `npm run typecheck` | PASS | TypeScript compilation succeeds. |
+| `npm run test:security` | PASS | **113/113 tests passed** on 2026-11-22. |
+| `npm run build:extension` | PASS | Zen extension `0.3.9`; XPI created under `artifacts/build/zen-extension/`. |
+| `npm run dist` | PASS | Windows NSIS installer created under `artifacts/build/windows/`; packaged app was not launched against the normal user profile. |
+| `npm run release:metadata` | PASS | Update manifest and extension version marker generated successfully; local staging files were then removed. |
+| Build output layout | UPDATED | Electron Builder output now belongs under `artifacts/build/windows/`; release staging is separate. |
+| Real authenticated provider E2E | NOT VERIFIED | Deterministic tests do not replace live validation in the user's authenticated browser profiles. |
+
+The no-go decision for new user-facing features remains in force until the live-provider readiness blockers below are closed. No normal Zen profile or installed extension was modified during this verification.
+
 This document records the current implementation and diagnostic evidence. It supersedes older audit claims only where it explicitly describes a current source or test observation; historical forensic artifacts remain preserved and are not treated as current implementation truth.
 
-## Verified baseline
+## Historical verified baseline — 2026-11-21
 
 | Check | Result | Notes |
 |---|---|---|

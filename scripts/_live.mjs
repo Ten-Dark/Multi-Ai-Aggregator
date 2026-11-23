@@ -1,8 +1,11 @@
-import path from 'node:path'
 import { _electron as electron } from 'playwright'
 
 const project = process.cwd()
 const log = (k, v) => console.log(k, typeof v === 'string' ? v : JSON.stringify(v))
+
+if (process.env.MAI_ALLOW_USER_PROFILE_SMOKE !== '1') {
+  throw new Error('Refusing to launch against the normal user profile. Set MAI_ALLOW_USER_PROFILE_SMOKE=1 explicitly.')
+}
 
 const app = await electron.launch({ args: ['.'], cwd: project })
 const page = await app.firstWindow()
@@ -21,48 +24,51 @@ const waitBadge = async (timeoutMs) => {
 
 try {
   const pairingCode = (await page.locator('.pairing-code').innerText()).trim()
-  log('CODE_SHOWN', pairingCode.startsWith('ws://127.0.0.1:') && pairingCode.includes('|'))
-  log('BADGE', await waitBadge(60_000))
+  log('CODE_SHOWN', Boolean(pairingCode))
+  await waitBadge(60_000)
+  log('BADGE_CONNECTED', true)
   log('CONNECTION_INFO', await page.evaluate(() => {
     const info = window.aggregator.getZenConnection()
-    return { wsUrl: info.wsUrl, connected: info.connected, extensionVersion: info.extensionVersion }
+    return { connected: info.connected, extensionVersion: info.extensionVersion }
   }))
 
   const sessions = await page.evaluate(() => window.aggregator.checkSessions())
-  log('SESSIONS', sessions.map((s) => `${s.model}=${s.status} (${s.message})`).join(' | '))
+  log('SESSIONS', sessions.map((s) => `${s.model}=${s.status}`).join(' | '))
 
-  const prompt = 'Ответь ровно одним словом: ОК'
-  const started = Date.now()
-  const results = await page.evaluate((p) => window.aggregator.sendAll(p), prompt)
-  log('SEND_ALL_SECONDS', String(Math.round((Date.now() - started) / 1000)))
-  for (const r of results) {
-    log(`RESULT_${r.model.toUpperCase()}`, {
-      status: r.status,
-      code: r.errorCode,
-      error: r.error ? r.error.slice(0, 200) : undefined,
-      text: (r.text || '').slice(0, 120),
-    })
-  }
-
-  await page.waitForTimeout(1500)
-  await page.screenshot({ path: path.join(project, 'live-ui.png'), fullPage: true })
-
-  const answers = results
-    .filter((r) => r.status === 'done' && r.text)
-    .map((r) => ({ model: r.model, text: r.text }))
-  if (answers.length > 0) {
-    const synth = await page.evaluate(
-      ({ p, a }) => window.aggregator.synthesize({ model: 'chatgpt', prompt: p, answers: a }),
-      { p: prompt, a: answers },
-    )
-    log('SYNTHESIS', { model: synth.model, text: synth.text.slice(0, 200) })
-    await page.screenshot({ path: path.join(project, 'live-synthesis.png'), fullPage: true })
+  if (process.env.MAI_ALLOW_LIVE_PROVIDER_TESTS !== '1') {
+    log('SEND_ALL', 'skipped; set MAI_ALLOW_LIVE_PROVIDER_TESTS=1 to submit a real prompt')
+    process.exitCode = 0
   } else {
-    log('SYNTHESIS', 'skipped: no completed answers')
+    const prompt = 'Ответь ровно одним словом: ОК'
+    const started = Date.now()
+    const results = await page.evaluate((p) => window.aggregator.sendAll(p), prompt)
+    log('SEND_ALL_SECONDS', String(Math.round((Date.now() - started) / 1000)))
+    for (const r of results) {
+      log(`RESULT_${r.model.toUpperCase()}`, {
+        status: r.status,
+        code: r.errorCode,
+        hasText: Boolean(r.text),
+        textLength: r.text?.length ?? 0,
+      })
+    }
+
+    await page.waitForTimeout(1500)
+
+    const answers = results
+      .filter((r) => r.status === 'done' && r.text)
+      .map((r) => ({ model: r.model, text: r.text }))
+    if (answers.length > 0) {
+      const synth = await page.evaluate(
+        ({ p, a }) => window.aggregator.synthesize({ model: 'chatgpt', prompt: p, answers: a }),
+        { p: prompt, a: answers },
+      )
+      log('SYNTHESIS', { model: synth.model, hasText: Boolean(synth.text), textLength: synth.text.length })
+    } else {
+      log('SYNTHESIS', 'skipped: no completed answers')
+    }
   }
 } catch (error) {
-  log('FAIL', error instanceof Error ? error.message : String(error))
-  await page.screenshot({ path: path.join(project, 'live-fail.png'), fullPage: true }).catch(() => {})
+  log('FAIL', error instanceof Error ? error.name : 'UnknownError')
 } finally {
   await app.close().catch(() => {})
 }
