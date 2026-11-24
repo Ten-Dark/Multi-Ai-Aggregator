@@ -20,7 +20,7 @@ The root-level installer is a generated local artifact and is ignored by Git. Ea
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every branch push and pull request. It installs the locked dependencies, runs TypeScript typecheck, executes the full automated test suite, and builds the Zen extension. The tag-triggered release workflow remains responsible for packaging and publishing release assets.
+`.github/workflows/ci.yml` runs on every branch push and pull request using `windows-latest`, because the current XPI packaging script depends on Windows PowerShell `Compress-Archive`. It installs the locked dependencies, runs TypeScript typecheck, executes the full automated test suite, and builds the Zen extension. The tag-triggered release workflow remains responsible for packaging and publishing release assets.
 
 ## Official release
 

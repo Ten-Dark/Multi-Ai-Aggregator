@@ -19,7 +19,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+    runs-on: windows-latest
         uses: actions/checkout@v4
 
       - name: Set up Node
