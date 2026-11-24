@@ -10,10 +10,13 @@ npm run dist
 npm run build:extension
 ```
 
-Generated files are kept outside the release staging directory:
+After `npm run dist`, the current Windows installer is copied to the project root:
 
-- Windows installer and unpacked Electron package: `artifacts/build/windows/`
+- **Convenient local installer:** `Multi-AI-Aggregator-Setup-<version>.exe` (project root)
+- Original installer and unpacked Electron package: `artifacts/build/windows/`
 - Local unsigned Zen XPI: `artifacts/build/zen-extension/`
+
+The root-level installer is a generated local artifact and is ignored by Git. Each successful `npm run dist` replaces an older root-level installer with the newly built version.
 
 ## Official release
 

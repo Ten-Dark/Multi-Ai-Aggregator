@@ -5,6 +5,8 @@ node_modules/
 dist-electron/
 release/
 artifacts/
+/Multi-AI-Aggregator-Setup-*.exe
+/Multi-AI-Aggregator-Setup-*.exe.sha256
 
 # Test artifacts and probe data
 probe/

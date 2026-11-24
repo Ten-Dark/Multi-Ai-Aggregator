@@ -15,7 +15,7 @@
     "build:extension": "node scripts/build-zen-extension.mjs",
     "release:metadata": "node scripts/create-zen-update-manifest.mjs",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder --publish never"
+    "dist": "npm run build && electron-builder --publish never && node scripts/copy-windows-installer.mjs"
   },
   "dependencies": {
     "ws": "^8.23.0"
