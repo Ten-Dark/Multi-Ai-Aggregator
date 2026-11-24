@@ -98,12 +98,32 @@ test('confirmed cancellation wins over a late model response', async (t) => {
     (message) => message.type === 'command' && message.action === 'cancelTask',
   )
   socket.send(JSON.stringify({
+    type: 'progress',
+    taskId: sendCommand.payload.taskId,
+    model: 'chatgpt',
+    phase: 'waiting',
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(events.some((event) =>
+    event.type === 'model' && event.result.taskId === sendCommand.payload.taskId &&
+    event.result.status === 'waiting'), false)
+  assert.equal(events.at(-1).result.status, 'cancelling')
+
+  socket.send(JSON.stringify({
     type: 'response',
     id: cancelCommand.id,
     ok: true,
     data: { taskId: sendCommand.payload.taskId, cancelled: true },
   }))
   assert.deepEqual(await cancellation, { accepted: true, confirmed: true, status: 'cancelled' })
+  socket.send(JSON.stringify({
+    type: 'progress',
+    taskId: sendCommand.payload.taskId,
+    model: 'chatgpt',
+    phase: 'waiting',
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(events.at(-1).result.status, 'cancelled')
 
   socket.send(JSON.stringify({
     type: 'response',

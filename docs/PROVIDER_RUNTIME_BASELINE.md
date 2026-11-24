@@ -9,10 +9,19 @@
 
 This section supersedes the earlier repository-layout and validation observations below. It does not supersede the live-provider E2E limitations or the no-go decision.
 
+### Gordon audit remediation — 2026-11-24
+
+- **Cancellation race fixed:** `TaskRegistry.setStatus()` now rejects progress updates while a task is `cancelling`; terminal states already reject updates. A failed cancellation can still restore the captured pre-cancellation state.
+- **Regression coverage:** the WebSocket lifecycle test injects a late `waiting` progress event after cancellation begins and again after cancellation is confirmed, then injects a late successful response. The task remains `cancelled` and the late response is ignored.
+- **Partial response contract rechecked:** bridge errors preserve partial text with `status: 'error'` and `partial: true`; the response card labels it as incomplete, and synthesis receives the text with the explicit error `ответ не завершён`. The audit wording that it is simply treated as a complete `received` result is not supported by the current code.
+- **Extension-origin policy rechecked:** a candidate origin is persisted only after a valid pairing-token comparison. A different valid extension origin can be rebound after successful pairing, supporting extension reinstall/profile migration. The existing security-origin tests cover this behavior; no code change was made.
+- **CI added:** `.github/workflows/ci.yml` runs on pushes to branches and pull requests; it performs typecheck, the full automated test suite, and extension build. The release workflow remains tag-triggered.
+- **Dependency audit rechecked:** `npm audit --omit=dev` reports zero vulnerabilities. Full `npm audit` reports six moderate dependency-path findings; the affected installed `minimatch` is `10.2.6`, and npm proposes downgrading `electron-builder` from `26.18.0` to `25.1.0` as a semver-major change. This downgrade was not applied without compatibility validation.
+
 | Check | Result | Notes |
 |---|---|---|
-
-| Latest code-bearing commit | `ebe04dd7d503dcf1cbba2382219c397e886460b0` | Includes diagnostic harness hardening; the follow-up baseline documentation was pushed in `edcda97`, and `main` is synchronized with `origin/main`. |
+| Latest code-bearing commit | Pending this remediation commit | Cancellation-state guard, regression coverage, and branch/PR CI are included in the current worktree. |
+| `npm run dist` | PASS | Windows NSIS installer rebuilt and copied to the project root. |
 | `npm run typecheck` | PASS | TypeScript compilation succeeds. |
 | `npm run test:security` | PASS | **113/113 tests passed** on 2026-11-24. |
 | `npm run build:extension` | PASS | Zen extension `0.3.9`; XPI created under `artifacts/build/zen-extension/`. |
@@ -21,6 +30,7 @@ This section supersedes the earlier repository-layout and validation observation
 | `npm audit` | WARN | Six moderate findings remain in development tooling (`electron-builder` / `@electron/universal` / `minimatch`); no automatic or breaking fix was applied. |
 | Live diagnostic harnesses | PASS | `e2e-send.mjs` and `integration-zen.mjs` now require explicit profile/live-test flags, redact prompt/response output, and avoid screenshots of conversation content; guard paths and syntax checks passed without launching either harness. |
 | Live environment snapshot | PARTIAL | Zen Browser processes are running. The app was launched once by the failed diagnostic guard-check and closed after session inspection timed out before `SEND_STARTED`; no real provider prompt was submitted. A pending local bridge-token migration may have occurred. |
+| CI workflow | PASS (configuration added) | `.github/workflows/ci.yml` runs on all branch pushes and pull requests; hosted execution will be confirmed by GitHub Actions after push. |
 | Real authenticated provider E2E | NOT VERIFIED | Requires user-controlled extension installation/pairing and manual validation of each provider in the active Zen profile. |
 
 The no-go decision for new user-facing features remains in force until the live-provider readiness blockers below are closed. Deterministic tests and package builds do not replace real authenticated provider E2E. No Zen profile or installed extension was directly modified. Because the app was launched once during the failed diagnostic preflight, a pending local bridge-token migration may have occurred; verify the displayed pairing code and extension connection before relying on the existing pairing.

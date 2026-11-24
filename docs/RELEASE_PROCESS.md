@@ -18,6 +18,10 @@ After `npm run dist`, the current Windows installer is copied to the project roo
 
 The root-level installer is a generated local artifact and is ignored by Git. Each successful `npm run dist` replaces an older root-level installer with the newly built version.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every branch push and pull request. It installs the locked dependencies, runs TypeScript typecheck, executes the full automated test suite, and builds the Zen extension. The tag-triggered release workflow remains responsible for packaging and publishing release assets.
+
 ## Official release
 
 Push a version tag (`v*`) to start `.github/workflows/release.yml`. The workflow runs tests, builds the installer and extension, lints the extension, creates update metadata, obtains a Mozilla AMO unlisted signature, verifies the signature metadata, and stages the final files in `release/`.

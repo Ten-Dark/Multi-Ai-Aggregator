@@ -50,7 +50,7 @@ export class TaskRegistry {
 
   setStatus(taskId: TaskId, status: TaskStatus): boolean {
     const task = this.tasks.get(taskId)
-    if (!task || TERMINAL_STATUSES.has(task.status)) return false
+    if (!task || TERMINAL_STATUSES.has(task.status) || task.status === 'cancelling') return false
     task.status = status
     return true
   }

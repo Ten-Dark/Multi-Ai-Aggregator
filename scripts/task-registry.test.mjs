@@ -54,13 +54,19 @@ test('terminal result wins and cannot be overwritten', () => {
   assert.equal(registry.get(taskId).result.status, 'done')
 })
 
-test('cancellation blocks late completion until acknowledged or restored', () => {
+test('progress cannot overwrite cancellation, and failed cancellation restores the prior state', () => {
   const registry = new TaskRegistry()
-  registry.register(task())
+  registry.register(task({ status: 'waiting' }))
 
   assert.equal(registry.beginCancellation(taskId).status, 'cancelling')
+  assert.equal(registry.setStatus(taskId, 'waiting'), false)
+  assert.equal(registry.setStatus(taskId, 'sending'), false)
+  assert.equal(registry.get(taskId).status, 'cancelling')
   assert.equal(registry.finish(taskId, result('done')), null)
+
   assert.equal(registry.restoreAfterCancellationFailure(taskId), true)
+  assert.equal(registry.get(taskId).status, 'waiting')
+  assert.equal(registry.setStatus(taskId, 'waiting'), true)
   assert.deepEqual(registry.finish(taskId, result('done')), result('done'))
 })
 
