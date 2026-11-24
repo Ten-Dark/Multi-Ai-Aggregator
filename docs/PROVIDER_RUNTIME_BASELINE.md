@@ -20,7 +20,7 @@ This section supersedes the earlier repository-layout and validation observation
 
 | Check | Result | Notes |
 |---|---|---|
-| Latest code-bearing commit | Pending this remediation commit | Cancellation-state guard, regression coverage, and branch/PR CI are included in the current worktree. |
+| Latest code-bearing commit | `74eeca46f6d47d773b9ca76660da13746a5afb3b` | Cancellation-state guard, regression coverage, and branch/PR CI. |
 | `npm run dist` | PASS | Windows NSIS installer rebuilt and copied to the project root. |
 | `npm run typecheck` | PASS | TypeScript compilation succeeds. |
 | `npm run test:security` | PASS | **113/113 tests passed** on 2026-11-24. |
